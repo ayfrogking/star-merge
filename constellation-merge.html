@@ -1,0 +1,2960 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>별모아 별자리</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    background: linear-gradient(180deg, #0b1029 0%, #1a1f4b 100%);
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh;
+    /* 모바일 dynamic viewport (주소바 변동 대응) */
+    min-height: 100dvh;
+    padding: 8px;
+  }
+  .game-wrap {
+    /* 가로 / 가용 세로(헤더+진행바+푸터 약 220px 제외, 캔버스 비율 400:600 보정) 모두 고려 */
+    width: min(400px, 100vw - 16px, calc((100dvh - 220px) * 400 / 600));
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .header {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 10px;
+    backdrop-filter: blur(6px);
+  }
+  .score-block { display: flex; flex-direction: column; }
+  .score-block .label { font-size: 13px; opacity: 0.7; }
+  .score-block .value { font-size: 24px; font-weight: 700; color: #FFD700; }
+  .score-block.best .value { color: #87CEFA; font-size: 18px; }
+  .next-block {
+    display: flex; flex-direction: column; align-items: center;
+    background: rgba(0,0,0,0.3);
+    padding: 4px 10px; border-radius: 8px;
+    min-width: 70px;
+  }
+  .next-block .label { font-size: 12px; opacity: 0.7; }
+  .next-block canvas { width: 36px; height: 36px; }
+  .next-block .name { font-size: 12px; }
+
+  .canvas-container {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 400 / 600;
+    background: rgba(0,0,0,0.35);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 0 30px rgba(120, 130, 255, 0.25);
+    transition: box-shadow 0.2s;
+  }
+  .canvas-container.danger {
+    box-shadow: 0 0 40px rgba(255, 60, 60, 0.7), inset 0 0 30px rgba(255, 0, 0, 0.3);
+  }
+  .canvas-container.paused::after {
+    content: '⏸ PAUSED';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 700;
+    background: rgba(0,0,0,0.6);
+    z-index: 5;
+  }
+  canvas#gameCanvas { display: block; width: 100%; height: 100%; }
+
+  .combo-toast {
+    position: absolute; top: 100px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 22px; font-weight: 800;
+    color: #FFD700;
+    text-shadow: 0 0 10px rgba(255,215,0,0.8), 0 0 20px rgba(255,140,0,0.5);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.2s, transform 0.4s;
+    z-index: 4;
+  }
+  .combo-toast.show {
+    opacity: 1; transform: translateX(-50%) translateY(-20px);
+  }
+
+  .gameover-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px; z-index: 10;
+  }
+  .gameover-overlay.show { display: flex; }
+  .gameover-overlay h2 { font-size: 36px; color: #FF6B6B; }
+  .gameover-overlay div { font-size: 16px; }
+  .gameover-overlay button {
+    padding: 10px 22px; border: none;
+    border-radius: 8px; background: #FFD700;
+    color: #000; font-weight: 700; cursor: pointer;
+  }
+  .footer { display: flex; gap: 8px; }
+  .item-btn, .pause-btn {
+    flex: 1; padding: 12px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 10px;
+    background: linear-gradient(135deg, #4a148c, #1a237e);
+    color: #fff; font-size: 16px; font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s ease, opacity 0.2s;
+  }
+  .pause-btn { flex: 0 0 80px; background: linear-gradient(135deg, #263238, #455a64); }
+  .item-btn:active, .pause-btn:active { transform: scale(0.97); }
+  .item-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .item-btn .cd { font-size: 13px; opacity: 0.8; }
+  /* 단계 진행 바 */
+  .tier-progress {
+    display: flex; align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 6px 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 10px;
+    overflow-x: auto;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .tier-progress::-webkit-scrollbar { display: none; }
+  .tier-cell {
+    flex: 0 0 26px;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.4);
+    border: 1.5px solid rgba(255,255,255,0.18);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+  }
+  .tier-cell.unlocked {
+    border-color: rgba(255,215,0,0.7);
+    box-shadow: 0 0 6px rgba(255,215,0,0.4);
+  }
+  .tier-cell.current {
+    transform: scale(1.2);
+    border-color: #FFD700;
+    box-shadow: 0 0 10px rgba(255,215,0,0.8);
+  }
+  .tier-cell .locked-mark {
+    font-size: 11px; font-weight: 700;
+    color: rgba(255,255,255,0.45);
+  }
+  .tier-cell canvas { width: 22px; height: 22px; }
+  .tier-arrow {
+    flex: 0 0 auto;
+    font-size: 10px; opacity: 0.5;
+    color: #FFD700;
+  }
+
+  .item-btn.targeting { background: linear-gradient(135deg, #d32f2f, #b71c1c); animation: pulse 0.8s infinite; }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,80,80,0.8); }
+    50% { box-shadow: 0 0 0 8px rgba(255,80,80,0); }
+  }
+  .canvas-container.targeting { cursor: crosshair; }
+  .deadline-countdown {
+    position: absolute;
+    left: 50%; top: 92px;
+    transform: translateX(-50%);
+    background: rgba(255, 30, 30, 0.85);
+    color: #fff;
+    font-size: 24px; font-weight: 800;
+    padding: 6px 18px;
+    border-radius: 22px;
+    box-shadow: 0 0 20px rgba(255, 30, 30, 0.7);
+    z-index: 6; pointer-events: none;
+    display: none;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 6px rgba(0,0,0,0.6);
+  }
+  .deadline-countdown.show { display: block; animation: pulseRed 0.8s infinite; }
+  @keyframes pulseRed {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    50% { transform: translateX(-50%) scale(1.1); }
+  }
+  .canvas-container.targeting::before {
+    content: '🌀 제거할 별을 클릭하세요';
+    position: absolute; top: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(211,47,47,0.85);
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; font-weight: 700;
+    z-index: 6; pointer-events: none;
+    white-space: nowrap;
+  }
+
+  /* 시작 화면 */
+  .start-screen {
+    position: fixed; inset: 0;
+    background: linear-gradient(180deg, #0b1029 0%, #1a1f4b 50%, #2d1b4e 100%);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    padding: 20px;
+    overflow: hidden;
+  }
+  .start-screen.hidden { display: none; }
+  .start-screen .stars-bg {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .top-bar {
+    position: absolute; top: 16px; right: 16px;
+    display: flex; gap: 8px; z-index: 2;
+  }
+  .icon-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(255,255,255,0.1);
+    color: #fff; font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.1s, background 0.2s;
+  }
+  .icon-btn:hover { background: rgba(255,255,255,0.2); }
+  .icon-btn:active { transform: scale(0.92); }
+  .icon-btn.lang { font-size: 12px; font-weight: 700; }
+
+  .mascot {
+    font-size: 100px;
+    animation: floaty 3s ease-in-out infinite;
+    filter: drop-shadow(0 0 20px rgba(255,215,0,0.6));
+    z-index: 2;
+  }
+  @keyframes floaty {
+    0%, 100% { transform: translateY(0) rotate(-5deg); }
+    50% { transform: translateY(-12px) rotate(5deg); }
+  }
+  .game-title {
+    font-size: 36px; font-weight: 800;
+    background: linear-gradient(135deg, #FFD700, #FF6B9D, #87CEFA);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 2px;
+    margin-top: 12px;
+    z-index: 2;
+  }
+  .game-subtitle {
+    font-size: 13px; opacity: 0.7;
+    margin-bottom: 30px;
+    z-index: 2;
+  }
+  .menu-btns {
+    display: flex; flex-direction: column;
+    gap: 10px; width: min(280px, 80vw);
+    z-index: 2;
+  }
+  .menu-btn {
+    padding: 14px 20px;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(74,20,140,0.7), rgba(26,35,126,0.7));
+    color: #fff;
+    font-size: 16px; font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s, background 0.2s;
+    backdrop-filter: blur(10px);
+  }
+  .menu-btn:hover { background: linear-gradient(135deg, rgba(94,30,170,0.9), rgba(36,55,156,0.9)); }
+  .menu-btn:active { transform: scale(0.97); }
+  .menu-btn.primary {
+    background: linear-gradient(135deg, #FFD700, #FF8C00);
+    color: #1a1a1a;
+    font-size: 18px; font-weight: 800;
+    border: none;
+  }
+  .menu-btn.primary:hover {
+    background: linear-gradient(135deg, #FFE55C, #FF9D1F);
+  }
+
+  /* 모달 */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 200; padding: 20px;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: linear-gradient(180deg, #1a1f4b, #0b1029);
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 16px;
+    padding: 24px;
+    max-width: 400px; width: 100%;
+    max-height: 80vh; overflow-y: auto;
+    color: #fff;
+  }
+  .modal h3 {
+    font-size: 24px; margin-bottom: 16px;
+    color: #FFD700; text-align: center;
+  }
+  .modal-content { font-size: 15px; line-height: 1.7; }
+  .modal-content p { margin: 8px 0; }
+  .modal-content ul { padding-left: 20px; }
+  .modal-content li { margin: 4px 0; }
+  .modal-close {
+    margin-top: 20px; width: 100%;
+    padding: 10px;
+    border: none; border-radius: 8px;
+    background: #FFD700; color: #000;
+    font-weight: 700; cursor: pointer;
+  }
+  .achievement-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px; margin: 4px 0;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.05);
+  }
+  .achievement-item.unlocked { background: rgba(255,215,0,0.15); border-left: 3px solid #FFD700; }
+  .achievement-item .ach-icon { font-size: 28px; }
+  .achievement-item .ach-info { flex: 1; }
+  .achievement-item .ach-name { font-weight: 700; font-size: 15px; }
+  .achievement-item .ach-desc { font-size: 13px; opacity: 0.7; }
+  .achievement-item.locked { opacity: 0.5; }
+  .stat-row {
+    display: flex; justify-content: space-between;
+    padding: 8px 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .stat-row .stat-label { opacity: 0.8; }
+  .stat-row .stat-value { font-weight: 700; color: #FFD700; }
+
+  /* 게임 방법 (간결한 카드/표 형태) */
+  .howto-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .howto-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .howto-item .ic { font-size: 20px; flex: 0 0 28px; text-align: center; }
+  .diff-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 13px; margin-top: 4px;
+  }
+  .diff-table th, .diff-table td {
+    padding: 8px 4px; text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .diff-table th {
+    font-size: 12px; opacity: 0.7;
+    background: rgba(255,255,255,0.04);
+  }
+  .diff-table td:first-child { font-weight: 700; text-align: left; padding-left: 8px; }
+  .diff-table .d-easy { color: #90EE90; }
+  .diff-table .d-med  { color: #FFD700; }
+  .diff-table .d-hard { color: #FF8C00; }
+  .diff-table .d-hell { color: #FF1493; }
+
+  /* 난이도 선택 */
+  .diff-btn {
+    padding: 14px 16px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(74,20,140,0.7), rgba(26,35,126,0.7));
+    color: #fff; cursor: pointer;
+    text-align: center;
+    transition: transform 0.1s, background 0.2s;
+  }
+  .diff-btn:hover { background: linear-gradient(135deg, rgba(94,30,170,0.9), rgba(36,55,156,0.9)); }
+  .diff-btn:active { transform: scale(0.98); }
+  .diff-btn .diff-name { font-size: 18px; font-weight: 800; display: block; margin-bottom: 4px; }
+  .diff-btn .diff-desc { font-size: 12px; opacity: 0.75; line-height: 1.4; display: block; }
+  .diff-btn.easy   .diff-name { color: #90EE90; }
+  .diff-btn.medium .diff-name { color: #FFD700; }
+  .diff-btn.hard   .diff-name { color: #FF8C00; }
+  .diff-btn.hell {
+    background: linear-gradient(135deg, #4a0000, #1a0000);
+    border-color: #FF1493;
+  }
+  .diff-btn.hell .diff-name { color: #FF1493; }
+  .diff-btn.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: rgba(50,50,50,0.5);
+  }
+  .diff-btn.locked:hover { background: rgba(50,50,50,0.5); }
+
+  /* NEXT 큐 */
+  .next-block { min-width: 60px; }
+  .next-queue { display: flex; gap: 6px; align-items: center; justify-content: center; }
+  .next-slot {
+    display: flex; flex-direction: column; align-items: center;
+    background: rgba(0,0,0,0.3);
+    padding: 3px 6px; border-radius: 6px;
+  }
+  .next-slot canvas { width: 36px; height: 36px; }
+  .next-slot .slot-label { font-size: 11px; opacity: 0.7; }
+
+  /* 헬 모드 UI */
+  .hell-bar {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: rgba(150,0,0,0.25);
+    border: 1px solid rgba(255,20,147,0.4);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .hell-bar.active { display: flex; }
+  .hell-bar { font-size: 14px; }
+  .hell-bar .timer-label { opacity: 0.8; font-size: 12px; }
+  .hell-bar .timer-value {
+    font-weight: 800; color: #FFD700;
+    font-variant-numeric: tabular-nums;
+  }
+  .hell-bar .timer-value.danger { color: #FF1493; animation: blink 0.4s infinite alternate; }
+  @keyframes blink { from { opacity: 1; } to { opacity: 0.4; } }
+  .hell-bar .warns { margin-left: auto; display: flex; gap: 3px; }
+  .hell-bar .warn-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255,255,255,0.3);
+  }
+  .hell-bar .warn-dot.on { background: #FF1493; border-color: #FF1493; box-shadow: 0 0 6px #FF1493; }
+
+  .diff-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px; font-weight: 700;
+    margin-left: 8px;
+  }
+  .diff-badge.easy   { background: #2e7d32; }
+  .diff-badge.medium { background: #f9a825; color: #000; }
+  .diff-badge.hard   { background: #ef6c00; }
+  .diff-badge.hell   { background: #c2185b; box-shadow: 0 0 6px #c2185b; }
+
+  /* ======= 모바일: 글씨 전반적으로 크게 ======= */
+  @media (max-width: 600px) {
+    .title { font-size: 18px; }
+    .score-block .label { font-size: 13px; }
+    .score-block .value { font-size: 26px; }
+    .score-block.best .value { font-size: 20px; }
+    .next-block .label { font-size: 12px; }
+    .next-block .name { font-size: 12px; }
+    .next-slot .slot-label { font-size: 12px !important; }
+
+    .item-btn, .pause-btn { font-size: 16px; padding: 14px; }
+    .item-btn .cd { font-size: 13px; }
+
+    .gameover-overlay h2 { font-size: 36px; }
+    .gameover-overlay div { font-size: 16px; }
+    .gameover-overlay button { font-size: 16px; padding: 12px 28px; }
+
+    .modal h3 { font-size: 24px; }
+    .modal-content { font-size: 15px; line-height: 1.7; }
+    .modal-close { font-size: 16px; padding: 12px; }
+
+    .stat-row { font-size: 14px; padding: 10px 4px; }
+    .stat-row .stat-label, .stat-row .stat-value { font-size: 14px; }
+
+    .achievement-item { padding: 10px; }
+    .achievement-item .ach-icon { font-size: 28px; }
+    .achievement-item .ach-name { font-size: 15px; }
+    .achievement-item .ach-desc { font-size: 13px; }
+
+    .menu-btn { font-size: 16px; padding: 16px; }
+    .menu-btn.primary { font-size: 18px; }
+
+    .game-title { font-size: 36px; letter-spacing: 1px; }
+    .game-subtitle { font-size: 14px; }
+
+    .icon-btn { width: 44px; height: 44px; font-size: 20px; }
+    .icon-btn.lang { font-size: 13px; }
+
+    .deadline-countdown { font-size: 28px; padding: 8px 22px; }
+    .combo-toast { font-size: 26px; }
+
+    .diff-btn { font-size: 16px; padding: 16px; }
+    .diff-btn .diff-name { font-size: 18px; }
+
+    .howto-item { font-size: 14px; }
+    .howto-item .ic { font-size: 20px; }
+    .diff-table { font-size: 13px; }
+    .diff-table th { font-size: 12px; }
+
+    .badge { font-size: 12px; padding: 4px 10px; }
+    .diff-badge { font-size: 12px; padding: 3px 10px; }
+    .hell-bar { font-size: 14px; }
+    .hell-bar .timer-label { font-size: 12px; }
+    .hell-bar .timer-value { font-size: 16px; }
+
+    /* 진행바: 모바일에서 9~10셀이 한 줄에 들어가도록 축소 */
+    .tier-progress { padding: 5px 4px; gap: 1px; }
+    .tier-cell { flex: 0 0 22px; width: 22px; height: 22px; }
+    .tier-cell canvas { width: 18px; height: 18px; }
+    .tier-cell .locked-mark { font-size: 9px; }
+    .tier-arrow { font-size: 8px; }
+  }
+</style>
+</head>
+<body>
+  <!-- 시작 화면 -->
+  <div class="start-screen" id="startScreen">
+    <canvas class="stars-bg" id="startBgCanvas"></canvas>
+    <div class="top-bar">
+      <button class="icon-btn" id="soundToggleBtn" title="Sound">🔊</button>
+      <button class="icon-btn lang" id="langToggleBtn" title="Language">KO</button>
+    </div>
+    <div class="mascot">⭐</div>
+    <div class="game-title" data-i18n="title">별모아 별자리</div>
+    <div class="game-subtitle" data-i18n="subtitle">작은 별을 모아 별자리를 완성해 보세요</div>
+    <div class="menu-btns">
+      <button class="menu-btn primary" id="startGameBtn" data-i18n="startGame">게임 시작</button>
+      <button class="menu-btn" id="howToBtn" data-i18n="howTo">📖 게임 방법</button>
+      <button class="menu-btn" id="achievementsBtn" data-i18n="achievements">🏆 업적</button>
+      <button class="menu-btn" id="recordsBtn" data-i18n="records">📊 종합기록</button>
+      <button class="menu-btn" id="rankingBtn" data-i18n="ranking">🏅 랭킹 보기</button>
+    </div>
+  </div>
+
+  <!-- 모달들 -->
+  <div class="modal-overlay" id="howToModal">
+    <div class="modal">
+      <h3 data-i18n="howToTitle">📖 게임 방법</h3>
+      <div class="modal-content" id="howToContent"></div>
+      <button class="modal-close" data-i18n="close">닫기</button>
+    </div>
+  </div>
+  <div class="modal-overlay" id="achievementsModal">
+    <div class="modal">
+      <h3 data-i18n="achievementsTitle">🏆 업적</h3>
+      <div class="modal-content" id="achievementsContent"></div>
+      <button class="modal-close" data-i18n="close">닫기</button>
+    </div>
+  </div>
+  <div class="modal-overlay" id="recordsModal">
+    <div class="modal">
+      <h3 data-i18n="recordsTitle">📊 종합기록</h3>
+      <div class="modal-content" id="recordsContent"></div>
+      <button class="modal-close" data-i18n="close">닫기</button>
+    </div>
+  </div>
+
+  <div class="game-wrap" id="gameWrap" style="display:none;">
+    <div class="header">
+      <div class="score-block">
+        <span class="label">SCORE</span>
+        <span id="score" class="value">0</span>
+      </div>
+      <div class="next-block">
+        <span class="label">NEXT</span>
+        <div class="next-queue" id="nextQueue"></div>
+      </div>
+      <div class="score-block best" style="text-align:right; align-items:flex-end;">
+        <span class="label">BEST</span>
+        <span id="bestScore" class="value">0</span>
+      </div>
+    </div>
+
+    <div class="tier-progress" id="tierProgress"></div>
+    <div class="hell-bar" id="hellBar">
+      <span class="timer-label" data-i18n="dropTimer">⏱ 낙하 제한</span>
+      <span class="timer-value" id="hellTimer">5.0s</span>
+      <div class="warns" id="hellWarns">
+        <span class="warn-dot"></span>
+        <span class="warn-dot"></span>
+        <span class="warn-dot"></span>
+      </div>
+    </div>
+
+    <div class="canvas-container" id="canvasContainer">
+      <canvas id="gameCanvas" width="400" height="600"></canvas>
+      <div class="combo-toast" id="comboToast"></div>
+      <div class="deadline-countdown" id="deadlineCountdown">10.0</div>
+      <div class="gameover-overlay" id="gameOverOverlay">
+        <h2>GAME OVER</h2>
+        <div>최종 점수: <span id="finalScore">0</span></div>
+        <div id="newBestMsg" style="color:#FFD700; font-weight:700; display:none;">🎉 신기록!</div>
+        <button id="restartBtn">다시 시작</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <button class="item-btn" id="blackholeBtn" data-i18n-html="blackhole">🌀 블랙홀 <span class="cd" id="blackholeCd"></span></button>
+      <button class="pause-btn" id="pauseBtn">⏸</button>
+    </div>
+  </div>
+
+  <!-- 난이도 선택 -->
+  <div class="modal-overlay" id="difficultyModal">
+    <div class="modal" style="text-align:center;">
+      <h3 data-i18n="diffTitle">난이도 선택</h3>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:8px;" id="diffBtns"></div>
+      <button class="modal-close" data-i18n="cancel">취소</button>
+    </div>
+  </div>
+
+  <!-- 일시정지 메뉴 -->
+  <div class="modal-overlay" id="pauseModal">
+    <div class="modal" style="text-align:center;">
+      <h3 data-i18n="pausedTitle">⏸ 일시정지</h3>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:8px;">
+        <button class="menu-btn primary" id="resumeBtn" data-i18n="resume">게임으로 돌아가기</button>
+        <button class="menu-btn" id="pauseSoundBtn">🔊 <span data-i18n="soundLabel">사운드</span></button>
+        <button class="menu-btn" id="gotoMainBtn" data-i18n="gotoMain">메인 화면으로</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 클리어 팝업 (쉬움/중간) -->
+  <div class="modal-overlay" id="clearModal">
+    <div class="modal" style="text-align:center;">
+      <h3 style="color:#FFD700;" data-i18n="clearTitle">🎉 클리어!</h3>
+      <p id="clearBody" style="margin:12px 0; line-height:1.6;"></p>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button class="menu-btn" id="clearMainBtn" style="flex:1;" data-i18n="gotoMain">메인 화면으로</button>
+        <button class="menu-btn primary" id="clearContinueBtn" style="flex:1;" data-i18n="continueGame">계속하기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 메인 복귀 확인 -->
+  <div class="modal-overlay" id="confirmMainModal">
+    <div class="modal" style="text-align:center;">
+      <h3 style="color:#FF6B6B;" data-i18n="confirmTitle">⚠ 정말 나가시겠어요?</h3>
+      <p data-i18n="confirmBody" style="margin:12px 0; line-height:1.6;">메인 화면으로 돌아가면 현재 게임이 초기화되고 점수가 사라집니다.</p>
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button class="menu-btn" id="cancelMainBtn" style="flex:1;" data-i18n="cancel">취소</button>
+        <button class="menu-btn primary" id="confirmMainBtn" style="flex:1; background: linear-gradient(135deg,#FF6B6B,#C62828); color:#fff;" data-i18n="confirmYes">나가기</button>
+      </div>
+    </div>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script>
+/* ============================================================
+ * 별자리 병합 게임 (Suika-style merge game)
+ * - Matter.js 물리 / 동일 단계 충돌 시 다음 단계 병합
+ * - 콤보, 사운드, 별자리 도트 패턴, 화면 흔들림, 일시정지,
+ *   최고점수, 데드라인 경고, 블랙홀 아이템, 반응형 캔버스
+ * ============================================================ */
+
+const { Engine, Runner, World, Bodies, Body, Events, Composite } = Matter;
+
+// ---------------- 다국어 ----------------
+const I18N = {
+  ko: {
+    title: '별모아 별자리',
+    subtitle: '작은 별을 모아 별자리를 완성해 보세요',
+    startGame: '게임 시작',
+    howTo: '📖 게임 방법',
+    achievements: '🏆 업적',
+    records: '📊 종합기록',
+    ranking: '🏅 랭킹 보기',
+    rankingComingSoon: '🚧 업데이트 예정입니다',
+    howToTitle: '📖 게임 방법',
+    achievementsTitle: '🏆 업적',
+    recordsTitle: '📊 종합기록',
+    close: '닫기',
+    blackhole: '🌀 블랙홀 ',
+    howToBody: `<p><b>1. 별 떨어뜨리기</b><br>화면 위쪽을 클릭하거나 터치해서 별을 떨어뜨립니다.</p>
+                <p><b>2. 같은 단계 합치기</b><br>같은 별자리끼리 부딪히면 다음 단계로 진화합니다.</p>
+                <p><b>3. 콤보</b><br>짧은 시간 내 연속 합치기 시 점수가 배수로 늘어납니다.</p>
+                <p><b>4. 블랙홀 아이템</b><br>버튼을 누른 뒤 제거하고 싶은 별을 클릭하면 사라집니다.</p>
+                <p><b>5. 게임 오버</b><br>별이 빨간 점선(데드라인)을 2초 이상 넘으면 게임 종료입니다.</p>`,
+    statTotalGames: '총 플레이',
+    statTotalMerges: '총 합치기 수',
+    statTotalScore: '누적 점수',
+    statBestScore: '최고 점수',
+    statMaxTier: '최고 단계',
+    statCount: '회',
+    statTimes: '회',
+    statPoints: '점',
+    statLv: 'Lv',
+    statPlayTime: '총 플레이 시간',
+    statMaxCombo: '최장 콤보',
+    statBlackholeUse: '블랙홀 사용',
+    statTierReach: '별자리 도달 횟수',
+    statFirstPlay: '첫 플레이',
+    statLastPlay: '마지막 플레이',
+    statClearTimeBest: '클리어 최단 시간',
+    statClearMinMerges: '최소 합치기 클리어',
+    statBestByDiff: '난이도별 최고 점수',
+    statAvgByDiff: '난이도별 평균 점수',
+    statDeadlineEscape: '데드라인 탈출',
+    statNewBest: '신기록 갱신',
+    statHellWarn: '헬 경고 누적',
+    statUiToggle: '사운드/언어 변경',
+    sectionCumulative: '누적/총합',
+    sectionEfficiency: '효율',
+    sectionByDiff: '난이도별 세부',
+    sectionSpecial: '특별 카운트',
+    paused: '⏸ 일시정지',
+    diffTitle: '난이도 선택',
+    diffEasy: '쉬움',
+    diffMedium: '중간',
+    diffHard: '어려움',
+    diffHell: '🔥 헬',
+    diffEasyDesc: 'NEXT 2칸 · 블랙홀 무제한(쿨타임 30초)',
+    diffMediumDesc: 'NEXT 1칸 · 블랙홀 5회',
+    diffHardDesc: 'NEXT 1칸 · 블랙홀 2회',
+    diffHellDesc: 'NEXT 없음 · 블랙홀 1회 · 5초 안에 낙하, 경고 3회면 종료',
+    diffLockedDesc: '🔒 쉬움/중간/어려움 모두 클리어(바다뱀 도달) 시 잠금 해제',
+    cleared: '클리어!',
+    dropTimer: '⏱ 낙하 제한',
+    blackholeRemain: '🌀',
+    pausedTitle: '⏸ 일시정지',
+    resume: '게임으로 돌아가기',
+    soundLabel: '사운드',
+    gotoMain: '메인 화면으로',
+    confirmTitle: '⚠ 정말 나가시겠어요?',
+    confirmBody: '메인 화면으로 돌아가면 현재 게임이 초기화되고 점수가 사라집니다.',
+    cancel: '취소',
+    confirmYes: '나가기',
+    clearTitle: '🎉 클리어!',
+    clearBodyEasy: '쉬움 난이도 클리어! 큰곰자리에 도달했어요. 계속 플레이하면 큰곰자리는 더 이상 합쳐지지 않습니다.',
+    clearBodyMedium: '중간 난이도 클리어! 처녀자리에 도달했어요. 계속 플레이하면 처녀자리는 더 이상 합쳐지지 않습니다.',
+    clearBodyHard: '어려움 난이도 클리어! 바다뱀자리가 우주를 가득 채웁니다…',
+    clearBodyHell: '🔥 헬 난이도 클리어! 진정한 우주의 지배자!',
+    continueGame: '계속하기',
+    gameOver: 'GAME OVER',
+    finalScore: '최종 점수',
+    newBest: '🎉 신기록!',
+    restart: '다시 시작',
+    blackholePrompt: '🌀 제거할 별을 클릭하세요',
+    clearedLabel: '클리어',
+    howToBase: `
+      <div class="howto-list">
+        <div class="howto-item"><span class="ic">🖱</span><span>화면 위를 클릭해 별을 떨어뜨리기</span></div>
+        <div class="howto-item"><span class="ic">✨</span><span>같은 별자리끼리 닿으면 다음 단계로 진화</span></div>
+        <div class="howto-item"><span class="ic">🔥</span><span>1.5초 내 연속 합치기 = 콤보 점수 배수</span></div>
+        <div class="howto-item"><span class="ic">🌀</span><span>블랙홀: 버튼 → 별 클릭하면 제거</span></div>
+        <div class="howto-item"><span class="ic">⚠</span><span>빨간선 위에 별이 10초 머물면 게임오버</span></div>
+      </div>`,
+    howToTableHead: `<table class="diff-table">
+        <tr><th></th><th>NEXT</th><th>🌀</th><th>목표</th></tr>
+        <tr><td class="d-easy">쉬움</td><td>2개</td><td>∞ (30s)</td><td>큰곰</td></tr>
+        <tr><td class="d-med">중간</td><td>1개</td><td>5회</td><td>처녀</td></tr>
+        <tr><td class="d-hard">어려움</td><td>1개</td><td>2회</td><td>바다뱀</td></tr>`,
+    howToTableHellRow: `<tr><td class="d-hell">🔥 헬</td><td>없음</td><td>1회</td><td>바다뱀</td></tr>`,
+    howToTableTail: `</table>`,
+    howToHellNote: `<p style="font-size:11px; opacity:0.7; margin-top:8px;">🔥 헬: 5초 안에 낙하 못 하면 경고, 3회면 종료.</p>`,
+    achList: [
+      { id: 'firstMerge', icon: '✨', name: '첫 발걸음',     desc: '첫 합치기 달성' },
+      { id: 'combo3',     icon: '🔥', name: '콤보 입문',     desc: '3 콤보 달성' },
+      { id: 'combo5',     icon: '🔥', name: '콤보 마스터',   desc: '5 콤보 달성' },
+      { id: 'combo10',    icon: '💥', name: '콤보 폭발',     desc: '10 콤보 달성' },
+      { id: 'tier5',      icon: '🌟', name: '별자리 수집가', desc: '오리온까지 도달' },
+      { id: 'tier8',      icon: '💫', name: '천체 관측자',   desc: '페가수스까지 도달' },
+      { id: 'tier9',      icon: '👑', name: '여왕의 별',     desc: '처녀 별자리 도달' },
+      { id: 'tier11',     icon: '🐉', name: '우주의 지배자', desc: '바다뱀 별자리 달성' },
+      { id: 'score1k',    icon: '🎯', name: '천 점',         desc: '1,000점 달성' },
+      { id: 'score10k',   icon: '🏆', name: '만 점',         desc: '10,000점 달성' },
+      { id: 'score50k',   icon: '👑', name: '오만 점',       desc: '50,000점 달성' },
+      { id: 'easyClear',  icon: '🟢', name: '쉬움 정복',     desc: '쉬움 난이도 클리어' },
+      { id: 'mediumClear',icon: '🟡', name: '중간 정복',     desc: '중간 난이도 클리어' },
+      { id: 'hardClear',  icon: '🟠', name: '어려움 정복',   desc: '어려움 난이도 클리어' },
+      { id: 'hellClear',  icon: '🔥', name: '지옥의 정복자', desc: '헬 모드 클리어' },
+      { id: 'allCleared', icon: '🌌', name: '우주의 마스터', desc: '쉬움/중간/어려움 모두 클리어' },
+      { id: 'noBlackhole',icon: '🚫', name: '맨손 정복',     desc: '블랙홀 없이 클리어' },
+      { id: 'speedy',     icon: '⚡', name: '스피드 러너',   desc: '8분 이내 클리어' },
+      // 추가 업적
+      { id: 'combo15',    icon: '🌪', name: '폭풍 콤보',     desc: '15 콤보 달성' },
+      { id: 'merge50',    icon: '♻',  name: '무한 동력',     desc: '한 게임에서 50회 합치기' },
+      { id: 'noDeadline', icon: '🎯', name: '한 방 컷',      desc: '데드라인 카운트 한 번도 없이 클리어' },
+      { id: 'noPause',    icon: '🧘', name: '무위',          desc: '일시정지 없이 클리어' },
+      { id: 'turtle30',   icon: '🐢', name: '거북이',        desc: '한 게임을 30분 이상 플레이' },
+      { id: 'starCollector', icon: '⭐', name: '별 수집가', desc: '별 누적 1,000개 떨어뜨리기' },
+      { id: 'play100',    icon: '📚', name: '백전노장',      desc: '100판 플레이' },
+      { id: 'score100k',  icon: '💯', name: '점수왕',        desc: '누적 100,000점' },
+      { id: 'collector',  icon: '🎨', name: '콜렉터',        desc: '한 게임에서 모든 별자리 등장' },
+      { id: 'beatbox',    icon: '🎵', name: '비트박스',      desc: '1초 간격 이내 3연속 합치기' },
+      { id: 'balance',    icon: '🌗', name: '균형',          desc: '한 게임 30회+ 합치기, 좌우 차이 5 이내' },
+      { id: 'speedrunMaster', icon: '⚡', name: '스피드런 마스터', desc: '모든 난이도를 15분 이내 클리어' },
+      { id: 'nightOwl',   icon: '🌅', name: '야행성',        desc: '자정~새벽 시간대 클리어' },
+    ]
+  },
+  en: {
+    title: 'Stars to Stellations',
+    subtitle: 'Gather little stars into great constellations',
+    startGame: 'Start Game',
+    howTo: '📖 How to Play',
+    achievements: '🏆 Achievements',
+    records: '📊 Stats',
+    ranking: '🏅 Ranking',
+    rankingComingSoon: '🚧 Update Coming Soon',
+    howToTitle: '📖 How to Play',
+    achievementsTitle: '🏆 Achievements',
+    recordsTitle: '📊 Stats',
+    close: 'Close',
+    blackhole: '🌀 Blackhole ',
+    howToBody: `<p><b>1. Drop Stars</b><br>Click or tap the top of the screen to drop a star.</p>
+                <p><b>2. Merge Same Tier</b><br>Same constellations evolve into the next tier on contact.</p>
+                <p><b>3. Combo</b><br>Quick consecutive merges multiply your score.</p>
+                <p><b>4. Blackhole Item</b><br>Press the button, then click a star to remove it.</p>
+                <p><b>5. Game Over</b><br>If stars cross the red dashed line for 2 seconds, game ends.</p>`,
+    statTotalGames: 'Games Played',
+    statTotalMerges: 'Total Merges',
+    statTotalScore: 'Total Score',
+    statBestScore: 'Best Score',
+    statMaxTier: 'Max Tier',
+    statCount: '',
+    statTimes: '',
+    statPoints: 'pts',
+    statLv: 'Lv',
+    statPlayTime: 'Total Play Time',
+    statMaxCombo: 'Max Combo',
+    statBlackholeUse: 'Blackholes Used',
+    statTierReach: 'Tier Reach Count',
+    statFirstPlay: 'First Play',
+    statLastPlay: 'Last Play',
+    statClearTimeBest: 'Best Clear Time',
+    statClearMinMerges: 'Fewest Merges Clear',
+    statBestByDiff: 'Best Score by Difficulty',
+    statAvgByDiff: 'Avg Score by Difficulty',
+    statDeadlineEscape: 'Deadline Escapes',
+    statNewBest: 'Records Set',
+    statHellWarn: 'Hell Warnings Total',
+    statUiToggle: 'Sound/Lang Toggles',
+    sectionCumulative: 'Totals',
+    sectionEfficiency: 'Efficiency',
+    sectionByDiff: 'By Difficulty',
+    sectionSpecial: 'Special',
+    paused: '⏸ PAUSED',
+    diffTitle: 'Select Difficulty',
+    diffEasy: 'Easy',
+    diffMedium: 'Medium',
+    diffHard: 'Hard',
+    diffHell: '🔥 Hell',
+    diffEasyDesc: 'NEXT x2 · Unlimited blackhole (30s cooldown)',
+    diffMediumDesc: 'NEXT x1 · 5 blackholes',
+    diffHardDesc: 'NEXT x1 · 2 blackholes',
+    diffHellDesc: 'No NEXT · 1 blackhole · 5s drop limit, 3 warnings = over',
+    diffLockedDesc: '🔒 Clear Easy / Medium / Hard (reach Hydra) to unlock',
+    cleared: 'Cleared!',
+    dropTimer: '⏱ Drop',
+    blackholeRemain: '🌀',
+    pausedTitle: '⏸ Paused',
+    resume: 'Resume Game',
+    soundLabel: 'Sound',
+    gotoMain: 'Back to Main',
+    confirmTitle: '⚠ Quit current game?',
+    confirmBody: 'Going back to the main menu will reset your current game and score.',
+    cancel: 'Cancel',
+    confirmYes: 'Quit',
+    clearTitle: '🎉 Cleared!',
+    clearBodyEasy: 'Easy cleared! You reached Ursa Major. Continuing will keep playing, but Ursa Majors will no longer merge.',
+    clearBodyMedium: 'Medium cleared! You reached Virgo. Continuing will keep playing, but Virgos will no longer merge.',
+    clearBodyHard: 'Hard cleared! Hydra fills the cosmos…',
+    clearBodyHell: '🔥 Hell cleared! True master of the cosmos!',
+    continueGame: 'Continue',
+    gameOver: 'GAME OVER',
+    finalScore: 'Final Score',
+    newBest: '🎉 New Record!',
+    restart: 'Restart',
+    blackholePrompt: '🌀 Click a star to remove',
+    clearedLabel: 'cleared',
+    howToBase: `
+      <div class="howto-list">
+        <div class="howto-item"><span class="ic">🖱</span><span>Click the top to drop a star</span></div>
+        <div class="howto-item"><span class="ic">✨</span><span>Same constellations merge into the next tier</span></div>
+        <div class="howto-item"><span class="ic">🔥</span><span>Merge within 1.5s = combo score multiplier</span></div>
+        <div class="howto-item"><span class="ic">🌀</span><span>Blackhole: press button, then click a star</span></div>
+        <div class="howto-item"><span class="ic">⚠</span><span>10s above the red line = game over</span></div>
+      </div>`,
+    howToTableHead: `<table class="diff-table">
+        <tr><th></th><th>NEXT</th><th>🌀</th><th>Goal</th></tr>
+        <tr><td class="d-easy">Easy</td><td>x2</td><td>∞ (30s)</td><td>Ursa Major</td></tr>
+        <tr><td class="d-med">Medium</td><td>x1</td><td>5</td><td>Virgo</td></tr>
+        <tr><td class="d-hard">Hard</td><td>x1</td><td>2</td><td>Hydra</td></tr>`,
+    howToTableHellRow: `<tr><td class="d-hell">🔥 Hell</td><td>—</td><td>1</td><td>Hydra</td></tr>`,
+    howToTableTail: `</table>`,
+    howToHellNote: `<p style="font-size:11px; opacity:0.7; margin-top:8px;">🔥 Hell: drop within 5s; 3 warnings end the run.</p>`,
+    achList: [
+      { id: 'firstMerge', icon: '✨', name: 'First Step',      desc: 'First merge' },
+      { id: 'combo3',     icon: '🔥', name: 'Combo Beginner',  desc: '3 combo' },
+      { id: 'combo5',     icon: '🔥', name: 'Combo Master',    desc: '5 combo' },
+      { id: 'combo10',    icon: '💥', name: 'Combo Burst',     desc: '10 combo' },
+      { id: 'tier5',      icon: '🌟', name: 'Star Collector',  desc: 'Reach Orion' },
+      { id: 'tier8',      icon: '💫', name: 'Sky Watcher',     desc: 'Reach Pegasus' },
+      { id: 'tier9',      icon: '👑', name: 'Queen of Stars',  desc: 'Reach Virgo' },
+      { id: 'tier11',     icon: '🐉', name: 'Cosmic Ruler',    desc: 'Reach Hydra' },
+      { id: 'score1k',    icon: '🎯', name: 'Thousand',        desc: 'Score 1,000' },
+      { id: 'score10k',   icon: '🏆', name: 'Ten Thousand',    desc: 'Score 10,000' },
+      { id: 'score50k',   icon: '👑', name: 'Fifty K',         desc: 'Score 50,000' },
+      { id: 'easyClear',  icon: '🟢', name: 'Easy Conqueror',  desc: 'Clear Easy' },
+      { id: 'mediumClear',icon: '🟡', name: 'Medium Conqueror',desc: 'Clear Medium' },
+      { id: 'hardClear',  icon: '🟠', name: 'Hard Conqueror',  desc: 'Clear Hard' },
+      { id: 'hellClear',  icon: '🔥', name: 'Hell Slayer',     desc: 'Clear Hell' },
+      { id: 'allCleared', icon: '🌌', name: 'Cosmic Master',   desc: 'Clear Easy/Medium/Hard' },
+      { id: 'noBlackhole',icon: '🚫', name: 'Bare Hands',      desc: 'Clear without blackhole' },
+      { id: 'speedy',     icon: '⚡', name: 'Speed Runner',    desc: 'Clear within 8 minutes' },
+      { id: 'combo15',    icon: '🌪', name: 'Combo Storm',     desc: '15 combo' },
+      { id: 'merge50',    icon: '♻',  name: 'Endless Engine',  desc: '50 merges in a game' },
+      { id: 'noDeadline', icon: '🎯', name: 'Untouchable',     desc: 'Clear without any deadline countdown' },
+      { id: 'noPause',    icon: '🧘', name: 'Zen',             desc: 'Clear without pausing' },
+      { id: 'turtle30',   icon: '🐢', name: 'Turtle',          desc: 'Play one game for 30+ minutes' },
+      { id: 'starCollector', icon: '⭐', name: 'Star Hoarder', desc: 'Drop 1,000 stars total' },
+      { id: 'play100',    icon: '📚', name: 'Veteran',         desc: 'Play 100 games' },
+      { id: 'score100k',  icon: '💯', name: 'Hundred K',       desc: 'Total score 100,000' },
+      { id: 'collector',  icon: '🎨', name: 'Completionist',   desc: 'See every constellation in one game' },
+      { id: 'beatbox',    icon: '🎵', name: 'Beatbox',         desc: '3 merges within 1s each' },
+      { id: 'balance',    icon: '🌗', name: 'Equilibrium',     desc: '30+ merges with left/right diff ≤ 5' },
+      { id: 'speedrunMaster', icon: '⚡', name: 'Speedrun Master', desc: 'Clear all difficulties within 15 min each' },
+      { id: 'nightOwl',   icon: '🌅', name: 'Night Owl',       desc: 'Clear during midnight–6am' },
+    ]
+  }
+};
+let currentLang = localStorage.getItem('cm_lang') || 'ko';
+function t(key) { return I18N[currentLang][key]; }
+
+// ---------------- 통계 / 업적 (LocalStorage) ----------------
+function loadStats() {
+  try { return JSON.parse(localStorage.getItem('cm_stats') || '{}'); } catch { return {}; }
+}
+function saveStats() { localStorage.setItem('cm_stats', JSON.stringify(stats)); }
+let stats = Object.assign({
+  totalGames: 0, totalMerges: 0, totalScore: 0, maxTier: 0,
+  achievements: {}, // id -> true
+  // 누적/총합
+  totalPlayTimeSec: 0,
+  maxComboEver: 0,
+  blackholeUseCount: 0,         // 사용 횟수 = 제거한 별 수 (동일)
+  tierReachCount: {},           // {tier: 도달 횟수}
+  firstPlayDate: null,
+  lastPlayDate: null,
+  // 효율
+  clearTimeBest: {},            // {diff: ms}
+  clearMinMerges: {},           // {diff: int}
+  // 난이도별 세부
+  bestByDiff: {},
+  scoreSumByDiff: {},
+  attemptsByDiff: {},
+  // 특별 카운트
+  deadlineEscapeCount: 0,
+  newBestCount: 0,
+  hellWarningTotal: 0,
+  soundToggleCount: 0,
+  langToggleCount: 0,
+  // UI 클릭 합계 (사운드 + 언어)
+  uiToggleCount: 0,
+}, loadStats());
+function unlockAchievement(id) {
+  if (stats.achievements[id]) return;
+  stats.achievements[id] = true;
+  saveStats();
+  showAchToast(id);
+}
+function showAchToast(id) {
+  const def = t('achList').find(a => a.id === id);
+  if (!def) return;
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed; top:20px; left:50%; transform:translateX(-50%);
+    background:linear-gradient(135deg,#FFD700,#FF8C00); color:#000; padding:10px 18px;
+    border-radius:24px; font-weight:700; z-index:300; box-shadow:0 4px 20px rgba(255,215,0,0.5);
+    animation: slideDown 0.4s ease-out;`;
+  toast.textContent = `🏆 ${def.icon} ${def.name}`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+// 사운드 토글
+let soundEnabled = localStorage.getItem('cm_sound') !== '0';
+
+// ---------------- 상수 ----------------
+const WIDTH = 400;
+const HEIGHT = 600;
+const WALL_THICKNESS = 20;
+const DEAD_LINE_Y = 80;
+const DEAD_LINE_GRACE_MS = 10000; // 10초 연속 침범 시 게임오버
+const DROP_COOLDOWN_MS = 1000;
+const COMBO_WINDOW_MS = 1500;       // 콤보 유지 시간
+
+// 난이도 정의
+//   nextCount: 헤더에 보이는 NEXT 슬롯 개수 (current 외에 보여줄 미래 공의 수)
+//   blackholeMax: 블랙홀 사용 가능 횟수 (-1 = 무제한)
+//   blackholeCd: 블랙홀 쿨타임(ms, 0 = 즉시)
+//   dropTimer:   공 낙하 제한 시간(ms, 0 = 없음). 0 아니면 헬 모드 룰 적용
+const DIFFICULTIES = {
+  easy:   { nextCount: 2, blackholeMax: -1, blackholeCd: 30000, dropTimer: 0 },
+  medium: { nextCount: 1, blackholeMax: 5,  blackholeCd: 0,     dropTimer: 0 },
+  hard:   { nextCount: 1, blackholeMax: 2,  blackholeCd: 0,     dropTimer: 0 },
+  hell:   { nextCount: 0, blackholeMax: 1,  blackholeCd: 0,     dropTimer: 5000 },
+};
+
+// 난이도별 최대 병합 단계 (이 단계 이상끼리는 부딛혀도 합쳐지지 않음)
+//   쉬움: 큰곰(8) — 큰곰끼리 병합 불가, 페가수스+페가수스 → 큰곰은 가능
+//   중간: 처녀(9) — 처녀끼리 병합 불가
+//   어려움: 바다뱀(10)
+//   헬: 바다뱀(10)
+const MAX_MERGE_TIER = { easy: 8, medium: 9, hard: 10, hell: 10 };
+
+// 난이도별 진행바 표시 범위 (성운 제외, 시작은 남십자 1)
+const PROGRESS_END = { easy: 8, medium: 9, hard: 10, hell: 10 };
+
+// 어려움 모드: 바다뱀 생성 시 빨간선을 자연스럽게 넘는 오버사이즈 반지름
+const HARD_HYDRA_RADIUS = 220;
+
+// 11단계 천체
+const TIERS = [
+  { name: '별',       enName: 'Star',       radius: 15,  color: '#D8BFD8' },
+  { name: '남십자',   enName: 'Crux',       radius: 25,  color: '#87CEFA' },
+  { name: '조랑말',   enName: 'Equuleus',   radius: 35,  color: '#90EE90' },
+  { name: '화살',     enName: 'Sagitta',    radius: 45,  color: '#F0E68C' },
+  { name: '오리온',   enName: 'Orion',      radius: 55,  color: '#FFA07A' },
+  { name: '백조',     enName: 'Cygnus',     radius: 65,  color: '#FF6347' },
+  { name: '사자',     enName: 'Leo',        radius: 75,  color: '#FFD700' },
+  { name: '페가수스', enName: 'Pegasus',    radius: 85,  color: '#DA70D6' },
+  { name: '큰곰',     enName: 'Ursa Major', radius: 95,  color: '#4169E1' },
+  { name: '처녀',     enName: 'Virgo',      radius: 110, color: '#8A2BE2' },
+  { name: '바다뱀',   enName: 'Hydra',      radius: 130, color: '#FF1493' },
+];
+function tierName(tier) {
+  const t = TIERS[tier];
+  return currentLang === 'en' ? (t.enName || t.name) : t.name;
+}
+
+// 별자리 도트/선 패턴 (단위원 -1..1 좌표)
+// 각 단계마다 점(stars)과 잇는 선(lines: [i, j])
+const CONSTELLATIONS = [
+  { stars: [[0,0]], lines: [], single: true },                                          // 별 (단일)
+  { stars: [[0,-0.6],[0,0.6],[-0.5,0],[0.5,0]], lines: [[0,1],[2,3]] },                  // 남십자
+  { stars: [[-0.5,-0.3],[0,-0.5],[0.4,-0.2],[0.5,0.4],[-0.2,0.5]], lines: [[0,1],[1,2],[2,3],[3,4]] }, // 조랑말
+  { stars: [[-0.6,0.5],[-0.2,0.1],[0.2,-0.3],[0.5,-0.5],[0.3,-0.1]], lines: [[0,1],[1,2],[2,3],[2,4]] }, // 화살
+  { stars: [[-0.5,-0.5],[0.5,-0.5],[-0.4,0.5],[0.4,0.5],[0,0],[-0.15,-0.05],[0.15,0.05]], lines: [[0,3],[1,2],[5,6]] }, // 오리온
+  { stars: [[0,-0.6],[-0.6,-0.1],[0.6,-0.1],[0,0.1],[0,0.6]], lines: [[0,3],[1,3],[2,3],[3,4]] }, // 백조
+  { stars: [[-0.6,0.3],[-0.3,-0.1],[0,-0.4],[0.3,-0.3],[0.5,0],[0.4,0.4]], lines: [[0,1],[1,2],[2,3],[3,4],[4,5]] }, // 사자
+  { stars: [[-0.5,-0.5],[0.5,-0.5],[0.5,0.3],[-0.5,0.3],[-0.7,0.6]], lines: [[0,1],[1,2],[2,3],[3,0],[3,4]] }, // 페가수스
+  { stars: [[-0.6,-0.3],[-0.3,-0.4],[0,-0.3],[0.2,-0.5],[0.3,0.1],[0.5,0.3],[0.6,0.5]], lines: [[0,1],[1,2],[2,3],[2,4],[4,5],[5,6]] }, // 큰곰
+  { stars: [[-0.5,-0.5],[-0.2,-0.2],[0,0],[0.3,0.3],[0.5,0.5],[-0.3,0.4],[0.4,-0.3]], lines: [[0,1],[1,2],[2,3],[3,4],[2,5],[2,6]] }, // 처녀
+  { stars: [[-0.7,0.3],[-0.4,0],[-0.1,-0.2],[0.2,0],[0.4,0.3],[0.6,0],[0.7,-0.4]], lines: [[0,1],[1,2],[2,3],[3,4],[4,5],[5,6]] }, // 바다뱀
+];
+
+// ---------------- 외부 에셋 설정 ----------------
+// 파일이 존재하면 자동으로 사용, 없으면 코드 렌더링/합성음으로 폴백
+const ASSET_CONFIG = {
+  // 천체 이미지 경로 (없으면 별자리 도트 패턴으로 그림)
+  tierImages: TIERS.map((_, i) => `images/tier${String(i+1).padStart(2,'0')}.png`),
+  background: 'images/background.png',
+  sounds: {
+    drop:      { src: 'sounds/drop.mp3',      volume: 0.5 },
+    merge:     { src: 'sounds/merge.mp3',     volume: 0.6 },
+    gameover:  { src: 'sounds/gameover.mp3',  volume: 0.7 },
+    blackhole: { src: 'sounds/blackhole.mp3', volume: 0.7 },
+    bgm:       { src: 'sounds/bgm.mp3',       volume: 0.3, loop: true },
+  }
+};
+
+const loadedImages = {};   // tier index -> Image (성공한 것만)
+const tierImageSEC = {};   // tier index -> { cx, cy, r } : PNG 불투명 픽셀의 최소외접원(SEC)
+let bgImage = null;
+const loadedSounds = {};   // key -> HTMLAudioElement (성공한 것만)
+
+// ---- 최소 외접원(Smallest Enclosing Circle) — Welzl's algorithm ----
+function _circle2(a, b) {
+  const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+  const r = Math.hypot(a[0] - cx, a[1] - cy);
+  return { x: cx, y: cy, r };
+}
+function _circle3(a, b, c) {
+  const ax = a[0], ay = a[1], bx = b[0], by = b[1], cx2 = c[0], cy2 = c[1];
+  const d = 2 * (ax * (by - cy2) + bx * (cy2 - ay) + cx2 * (ay - by));
+  if (Math.abs(d) < 1e-10) return null;
+  const ux = ((ax*ax + ay*ay)*(by - cy2) + (bx*bx + by*by)*(cy2 - ay) + (cx2*cx2 + cy2*cy2)*(ay - by)) / d;
+  const uy = ((ax*ax + ay*ay)*(cx2 - bx) + (bx*bx + by*by)*(ax - cx2) + (cx2*cx2 + cy2*cy2)*(bx - ax)) / d;
+  return { x: ux, y: uy, r: Math.hypot(ax - ux, ay - uy) };
+}
+function _trivialCircle(R) {
+  if (R.length === 0) return { x: 0, y: 0, r: 0 };
+  if (R.length === 1) return { x: R[0][0], y: R[0][1], r: 0 };
+  if (R.length === 2) return _circle2(R[0], R[1]);
+  return _circle3(R[0], R[1], R[2]) || _circle2(R[0], R[1]);
+}
+function _inCircle(p, c) {
+  if (!c) return false;
+  const dx = p[0] - c.x, dy = p[1] - c.y;
+  return dx * dx + dy * dy <= c.r * c.r + 1e-7;
+}
+// 반복형(스택 안전) Welzl 변형
+function smallestEnclosingCircle(points) {
+  const P = points.slice();
+  // 셔플
+  for (let i = P.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [P[i], P[j]] = [P[j], P[i]];
+  }
+  let c = null;
+  for (let i = 0; i < P.length; i++) {
+    if (!c || !_inCircle(P[i], c)) {
+      c = { x: P[i][0], y: P[i][1], r: 0 };
+      for (let j = 0; j < i; j++) {
+        if (!_inCircle(P[j], c)) {
+          c = _circle2(P[i], P[j]);
+          for (let k = 0; k < j; k++) {
+            if (!_inCircle(P[k], c)) {
+              c = _circle3(P[i], P[j], P[k]) || c;
+            }
+          }
+        }
+      }
+    }
+  }
+  return c;
+}
+
+// PNG 불투명 픽셀 분포로 SEC를 계산
+function computeImageSEC(img) {
+  // 다운샘플링 (성능)
+  const SAMPLE = 200;
+  const ratio = Math.min(1, SAMPLE / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.floor(img.width * ratio));
+  const h = Math.max(1, Math.floor(img.height * ratio));
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const oc = off.getContext('2d');
+  oc.drawImage(img, 0, 0, w, h);
+  let data;
+  try { data = oc.getImageData(0, 0, w, h).data; }
+  catch (e) { return null; } // file:// CORS 등
+
+  // 불투명 + 흰색 배경 아닌 픽셀 좌표 수집
+  const pts = [];
+  const step = 2;
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      const idx = (y * w + x) * 4;
+      const a = data[idx + 3];
+      const rC = data[idx], gC = data[idx + 1], bC = data[idx + 2];
+      if (a > 50 && !(rC > 240 && gC > 240 && bC > 240)) pts.push([x, y]);
+    }
+  }
+  if (pts.length < 3) return null;
+
+  // SEC 계산은 convex hull 위에서 돌리면 충분히 빠름
+  const hull = (function convexHull(points) {
+    const ps = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+    const lower = [];
+    for (const p of ps) {
+      while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+      lower.push(p);
+    }
+    const upper = [];
+    for (let i = ps.length - 1; i >= 0; i--) {
+      const p = ps[i];
+      while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+      upper.push(p);
+    }
+    upper.pop(); lower.pop();
+    return lower.concat(upper);
+  })(pts);
+
+  const sec = smallestEnclosingCircle(hull.length >= 3 ? hull : pts);
+  if (!sec) return null;
+  // 다운샘플링된 좌표 → 원본 픽셀 좌표
+  return {
+    cx: sec.x / ratio,
+    cy: sec.y / ratio,
+    r:  sec.r / ratio,
+  };
+}
+
+function tryLoadImage(src) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+function tryLoadSound(src) {
+  return new Promise(resolve => {
+    const a = new Audio();
+    a.oncanplaythrough = () => resolve(a);
+    a.onerror = () => resolve(null);
+    a.src = src;
+    a.load();
+  });
+}
+async function preloadAssets() {
+  // 천체 이미지 + 각 PNG의 최소외접원(SEC) 사전 계산
+  for (let i = 0; i < ASSET_CONFIG.tierImages.length; i++) {
+    const img = await tryLoadImage(ASSET_CONFIG.tierImages[i]);
+    if (img) {
+      loadedImages[i] = img;
+      const sec = computeImageSEC(img);
+      if (sec) tierImageSEC[i] = sec;
+    }
+  }
+  // 배경
+  bgImage = await tryLoadImage(ASSET_CONFIG.background);
+  // 사운드
+  for (const [key, cfg] of Object.entries(ASSET_CONFIG.sounds)) {
+    const a = await tryLoadSound(cfg.src);
+    if (a) {
+      a.volume = cfg.volume ?? 0.5;
+      if (cfg.loop) a.loop = true;
+      loadedSounds[key] = a;
+    }
+  }
+}
+
+function playSoundFile(key) {
+  if (!soundEnabled) return true; // 음소거지만 합성음으로도 떨어지지 않게 true 반환
+  const a = loadedSounds[key];
+  if (!a) return false;
+  // 동시 재생을 위해 복제 (bgm 제외)
+  if (key === 'bgm') {
+    a.play().catch(() => {});
+  } else {
+    const clone = a.cloneNode();
+    clone.volume = a.volume;
+    clone.play().catch(() => {});
+  }
+  return true;
+}
+
+// ---------------- DOM ----------------
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const bestScoreEl = document.getElementById('bestScore');
+const hellBarEl = document.getElementById('hellBar');
+const hellTimerEl = document.getElementById('hellTimer');
+const hellWarnsEl = document.getElementById('hellWarns');
+const difficultyModal = document.getElementById('difficultyModal');
+const diffBtnsEl = document.getElementById('diffBtns');
+const gameOverOverlay = document.getElementById('gameOverOverlay');
+const finalScoreEl = document.getElementById('finalScore');
+const newBestMsg = document.getElementById('newBestMsg');
+const restartBtn = document.getElementById('restartBtn');
+const blackholeBtn = document.getElementById('blackholeBtn');
+const blackholeCdEl = document.getElementById('blackholeCd');
+const pauseBtn = document.getElementById('pauseBtn');
+const container = document.getElementById('canvasContainer');
+const comboToast = document.getElementById('comboToast');
+
+// ---------------- 상태 ----------------
+let engine, world, runner;
+let score = 0;
+let bestScore = parseInt(localStorage.getItem('constellation_best') || '0', 10);
+let lastDropTime = 0;
+let nextTier = 0;
+let isGameOver = false;
+let isPaused = false;
+let deadLineEnterTime = null;
+let aimX = WIDTH / 2;
+let particles = [];
+let popAnims = new Map();          // body -> {start, duration} 팝 애니메이션
+let shake = { x: 0, y: 0, mag: 0 }; // 화면 흔들림
+let combo = 0;
+let lastMergeTime = 0;
+let lastBlackholeTime = -Infinity;
+const droppedBodies = new Set();
+const unlockedTiers = new Set();   // 현재 게임에서 등장한 단계 인덱스
+
+// 난이도/큐/헬 모드 상태
+let currentDifficulty = 'medium';
+let nextQueue = [];                  // 큐: 미래 떨어질 공들의 tier 인덱스
+let blackholeUses = 0;               // 현재 게임에서 남은 블랙홀 사용 횟수
+let hellWarnings = 0;
+let hellDropDeadline = null;         // 다음 낙하 마감 시각 (performance.now() ms)
+let dropTimerActive = false;
+
+// ---------------- Web Audio (간단 톤 신디사이저) ----------------
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch (e) { audioCtx = null; }
+  }
+  return audioCtx;
+}
+function playTone(freq, duration = 0.12, type = 'sine', volume = 0.15) {
+  if (!soundEnabled) return;
+  const ac = ensureAudio();
+  if (!ac) return;
+  const osc = ac.createOscillator();
+  const gain = ac.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(volume, ac.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+  osc.connect(gain).connect(ac.destination);
+  osc.start();
+  osc.stop(ac.currentTime + duration);
+}
+// 외부 사운드 파일이 있으면 그것을 사용, 없으면 합성음으로 폴백
+function sndDrop() {
+  if (playSoundFile('drop')) return;
+  playTone(220, 0.08, 'triangle', 0.1);
+}
+function sndMerge(tier) {
+  if (playSoundFile('merge')) return;
+  const f = 300 + tier * 60;
+  playTone(f, 0.15, 'sine', 0.18);
+  setTimeout(() => playTone(f * 1.5, 0.1, 'sine', 0.12), 60);
+}
+function sndGameOver() {
+  if (playSoundFile('gameover')) return;
+  playTone(180, 0.4, 'sawtooth', 0.2);
+  setTimeout(() => playTone(120, 0.5, 'sawtooth', 0.18), 150);
+}
+function sndBlackhole() {
+  if (playSoundFile('blackhole')) return;
+  playTone(80, 0.6, 'sawtooth', 0.2);
+  setTimeout(() => playTone(60, 0.4, 'sine', 0.15), 200);
+}
+
+// ---------------- 엔진 ----------------
+function initEngine() {
+  engine = Engine.create();
+  engine.world.gravity.y = 1.0;
+  world = engine.world;
+
+  const wallOpts = { isStatic: true, friction: 0.4 };
+  World.add(world, [
+    Bodies.rectangle(WIDTH / 2, HEIGHT + WALL_THICKNESS / 2, WIDTH, WALL_THICKNESS, wallOpts), // 바닥
+    Bodies.rectangle(-WALL_THICKNESS / 2, HEIGHT / 2, WALL_THICKNESS, HEIGHT * 2, wallOpts),    // 좌벽
+    Bodies.rectangle(WIDTH + WALL_THICKNESS / 2, HEIGHT / 2, WALL_THICKNESS, HEIGHT * 2, wallOpts), // 우벽
+    // 천장: 공이 위로 튀어 화면 밖으로 나가는 것 방지
+    Bodies.rectangle(WIDTH / 2, -WALL_THICKNESS / 2, WIDTH * 2, WALL_THICKNESS, wallOpts),
+  ]);
+
+  Events.on(engine, 'collisionStart', handleCollision);
+  Events.on(engine, 'afterUpdate', () => { if (!isPaused) checkGameOver(); });
+
+  // Matter.js Runner 대신 자체 fixed-timestep 루프 사용
+  // (Runner의 deltaMin 클램핑이 120Hz 디스플레이에서 시뮬을 2배 빠르게 만드는 버그 회피)
+  runner = { _custom: true, enabled: false };
+  startPhysicsLoop();
+}
+
+// ---------------- 자체 물리 루프 (60Hz 고정) ----------------
+let _physicsRAF = null;
+let _physicsLast = 0;
+let _physicsAccum = 0;
+const PHYSICS_DELTA = 1000 / 60; // 60Hz 고정 시간 간격
+
+function startPhysicsLoop() {
+  if (runner) runner.enabled = true;
+  _physicsLast = performance.now();
+  _physicsAccum = 0;
+  const tick = (now) => {
+    if (!runner || !runner.enabled) return;
+    const elapsed = now - _physicsLast;
+    _physicsLast = now;
+    // 누적 시간에 elapsed 더하고, spiral of death 방지를 위해 200ms로 제한
+    _physicsAccum = Math.min(200, _physicsAccum + elapsed);
+    // 물리는 정확히 60Hz로 갱신 (주사율 영향 없음)
+    while (_physicsAccum >= PHYSICS_DELTA) {
+      Engine.update(engine, PHYSICS_DELTA);
+      _physicsAccum -= PHYSICS_DELTA;
+    }
+    _physicsRAF = requestAnimationFrame(tick);
+  };
+  _physicsRAF = requestAnimationFrame(tick);
+}
+
+function stopPhysicsLoop() {
+  if (runner) runner.enabled = false;
+  if (_physicsRAF) {
+    cancelAnimationFrame(_physicsRAF);
+    _physicsRAF = null;
+  }
+}
+
+// ---------------- 단계 진행 바 ----------------
+const tierProgressEl = document.getElementById('tierProgress');
+function buildTierProgress() {
+  // 성운(0)은 시작 단계라 제외, 남십자(1)부터 시작
+  // 끝 인덱스는 난이도별 클리어 단계까지만 표시 (스포 방지 + 목표 명확화)
+  tierProgressEl.innerHTML = '';
+  const startIdx = 1;
+  const endIdx = PROGRESS_END[currentDifficulty] ?? (TIERS.length - 1);
+  for (let i = startIdx; i <= endIdx; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'tier-cell';
+    cell.dataset.tier = i;
+    cell.title = tierName(i);
+    cell.innerHTML = '<span class="locked-mark">?</span>';
+    tierProgressEl.appendChild(cell);
+    if (i < endIdx) {
+      const arr = document.createElement('span');
+      arr.className = 'tier-arrow';
+      arr.textContent = '➜';
+      tierProgressEl.appendChild(arr);
+    }
+  }
+}
+function updateTierProgress() {
+  const cells = tierProgressEl.querySelectorAll('.tier-cell');
+  // 현재 등장한 가장 높은 단계 찾기 (current 강조용)
+  let maxUnlocked = -1;
+  for (const t of unlockedTiers) maxUnlocked = Math.max(maxUnlocked, t);
+  cells.forEach(cell => {
+    const tier = parseInt(cell.dataset.tier, 10);
+    const isUnlocked = unlockedTiers.has(tier);
+    cell.classList.toggle('unlocked', isUnlocked);
+    cell.classList.toggle('current', tier === maxUnlocked);
+    if (isUnlocked) {
+      // PNG 또는 색상 원으로 표시
+      const img = loadedImages[tier];
+      const data = TIERS[tier];
+      if (cell.dataset.rendered === String(tier)) return; // 중복 렌더 방지
+      cell.dataset.rendered = String(tier);
+      cell.innerHTML = '';
+      const c = document.createElement('canvas');
+      c.width = 44; c.height = 44; // 2x for retina
+      const cc = c.getContext('2d');
+      // 옅은 색 원 배경
+      const grad = cc.createRadialGradient(22, 22, 4, 22, 22, 22);
+      grad.addColorStop(0, lighten(data.color, 0.5));
+      grad.addColorStop(1, data.color);
+      cc.globalAlpha = 0.4;
+      cc.fillStyle = grad;
+      cc.beginPath(); cc.arc(22, 22, 21, 0, Math.PI * 2); cc.fill();
+      cc.globalAlpha = 1;
+      // PNG가 있으면 그리기
+      if (img) {
+        const aspect = img.width / img.height;
+        const size = 36;
+        let iw, ih;
+        if (aspect >= 1) { iw = size; ih = size / aspect; }
+        else             { ih = size; iw = size * aspect; }
+        cc.drawImage(img, 22 - iw/2, 22 - ih/2, iw, ih);
+      } else {
+        // 별자리 도트 패턴 fallback
+        drawConstellation(cc, 22, 22, 18, tier, 1);
+      }
+      cell.appendChild(c);
+    } else {
+      // 잠금 (?)
+      if (cell.dataset.rendered !== 'locked') {
+        cell.dataset.rendered = 'locked';
+        cell.innerHTML = '<span class="locked-mark">?</span>';
+      }
+    }
+  });
+}
+
+// ---------------- 천체 생성 ----------------
+function createBody(x, y, tier, extra = {}) {
+  const data = TIERS[tier];
+  const tierFactor = tier / (TIERS.length - 1);
+  // 어려움 모드: 바다뱀(tier 10)은 의도적으로 오버사이즈로 생성
+  // → 빨간선을 즉시 넘어 10초 카운트다운 → 게임오버 + 클리어 연출
+  let radius = data.radius;
+  if (currentDifficulty === 'hard' && tier === 10) {
+    radius = HARD_HYDRA_RADIUS;
+  }
+  const body = Bodies.circle(x, y, radius, {
+    restitution: 0.45 - tierFactor * 0.1,
+    friction: 0.05 + tierFactor * 0.15,
+    frictionAir: 0.005,
+    density: 0.001,
+    label: 'star',
+    slop: 0.02,
+    ...extra,
+  });
+  body.tier = tier;
+  body.customRadius = radius; // 렌더/판정 시 참조 (오버사이즈 대응)
+  body.justMerged = false;
+  body.spawnTime = performance.now();
+  World.add(world, body);
+  // 진행 바 갱신: 새로 등장한 단계는 unlock
+  if (!unlockedTiers.has(tier)) {
+    unlockedTiers.add(tier);
+    updateTierProgress();
+  }
+  // 단계별 도달 횟수 누적 (통계)
+  stats.tierReachCount = stats.tierReachCount || {};
+  stats.tierReachCount[tier] = (stats.tierReachCount[tier] || 0) + 1;
+  // 별 수집가: 별(tier 0) 누적 1000개
+  if (tier === 0 && (stats.tierReachCount[0] || 0) >= 1000) {
+    unlockAchievement('starCollector');
+  }
+  // 콜렉터: 한 게임에서 모든 11단계 등장 (별 ~ 바다뱀)
+  if (unlockedTiers.size >= TIERS.length) {
+    unlockAchievement('collector');
+  }
+  return body;
+}
+
+// ---------------- 충돌(병합) ----------------
+function handleCollision(event) {
+  if (isGameOver || isPaused) return;
+  const removedIds = new Set();
+
+  for (const pair of event.pairs) {
+    const a = pair.bodyA, b = pair.bodyB;
+    if (a.label !== 'star' || b.label !== 'star') continue;
+    if (a.tier !== b.tier) continue;
+    if (a.tier === TIERS.length - 1) continue;
+    // 난이도별 병합 제한: 해당 단계 이상은 합쳐지지 않음
+    const maxMerge = MAX_MERGE_TIER[currentDifficulty] ?? 10;
+    if (a.tier >= maxMerge) continue;
+    if (removedIds.has(a.id) || removedIds.has(b.id)) continue;
+    if (a.justMerged || b.justMerged) continue;
+
+    a.justMerged = true; b.justMerged = true;
+    removedIds.add(a.id); removedIds.add(b.id);
+
+    const newTier = a.tier + 1;
+    const mx = (a.position.x + b.position.x) / 2;
+    const my = (a.position.y + b.position.y) / 2;
+    const tierColor = TIERS[a.tier].color;
+
+    // 사라진 공에 _removed 플래그 부여 → 지연된 setTimeout이 stale 추가하는 것 방지
+    a._removed = true; b._removed = true;
+    droppedBodies.delete(a); droppedBodies.delete(b);
+    World.remove(world, a); World.remove(world, b);
+
+    const newBody = createBody(mx, my, newTier);
+    droppedBodies.add(newBody);
+
+    // 팝 애니메이션 (스케일 1.4 → 1.0)
+    popAnims.set(newBody, { start: performance.now(), duration: 220 });
+
+    spawnMergeParticles(mx, my, tierColor);
+    sndMerge(newTier);
+
+    // 화면 흔들림 (큰 단계일수록 강하게)
+    addShake(2 + newTier * 0.6);
+
+    // 콤보
+    const now = performance.now();
+    combo = (now - lastMergeTime < COMBO_WINDOW_MS) ? combo + 1 : 1;
+    lastMergeTime = now;
+
+    // 점수: 누적식 (수박게임 방식)
+    const baseScore = (newTier + 1) * (newTier + 2) / 2 * 5;
+    const multiplier = combo >= 2 ? combo : 1;
+    score += Math.floor(baseScore * multiplier);
+    updateScoreUI();
+
+    if (combo >= 2) showComboToast(combo);
+
+    // 병합 반동: 주변 천체에 방사형 임펄스 → 주변 별이 흔들림
+    applyMergeRecoil(mx, my, newTier);
+
+    // 통계 / 업적
+    stats.totalMerges++;
+    if (newTier > stats.maxTier) stats.maxTier = newTier;
+    saveStats();
+    unlockAchievement('firstMerge');
+    if (combo >= 3)  unlockAchievement('combo3');
+    if (combo >= 5)  unlockAchievement('combo5');
+    if (combo >= 10) unlockAchievement('combo10');
+    if (combo >= 15) unlockAchievement('combo15');
+    if (combo > _maxComboThisGame) _maxComboThisGame = combo;
+    // 무한 동력: 한 게임 50회 병합
+    _mergeCountThisGame++;
+    if (_mergeCountThisGame >= 50) unlockAchievement('merge50');
+    // 좌/우 균형 추적 (병합 위치 기준)
+    if (mx < WIDTH / 2) _leftMergesThisGame++;
+    else                _rightMergesThisGame++;
+    // 비트박스: 1초 간격 이내 3연속 병합
+    _recentMergeTimes.push(now);
+    while (_recentMergeTimes.length > 3) _recentMergeTimes.shift();
+    if (_recentMergeTimes.length === 3) {
+      const d1 = _recentMergeTimes[1] - _recentMergeTimes[0];
+      const d2 = _recentMergeTimes[2] - _recentMergeTimes[1];
+      if (d1 < 1000 && d2 < 1000) unlockAchievement('beatbox');
+    }
+    if (newTier >= 4)  unlockAchievement('tier5');   // 오리온 (index 4)
+    if (newTier >= 7)  unlockAchievement('tier8');   // 페가수스 (index 7)
+    if (newTier >= 9)  unlockAchievement('tier9');   // 처녀 (index 9)
+    if (newTier >= 10) unlockAchievement('tier11');  // 바다뱀 (index 10)
+    if (score >= 1000)  unlockAchievement('score1k');
+    if (score >= 10000) unlockAchievement('score10k');
+    if (score >= 50000) unlockAchievement('score50k');
+    // 난이도 클리어 (바다뱀 도달)
+    checkClearedDifficulty(newTier);
+  }
+}
+
+// 병합 반동: 폭발 위치 주변 천체에 방사형 힘 적용
+function applyMergeRecoil(cx, cy, newTier) {
+  // 새로 생성된 단계가 클수록 반동 범위/세기 증가
+  const range = 60 + newTier * 18;     // 영향 반경 (px)
+  const baseForce = 0.0015 + newTier * 0.0006;
+  const bodies = Composite.allBodies(world);
+  for (const b of bodies) {
+    if (b.label !== 'star' || b.isStatic) continue;
+    const dx = b.position.x - cx;
+    const dy = b.position.y - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist === 0 || dist > range) continue;
+    // 거리 비례 약화 (선형 감쇠)
+    const falloff = 1 - (dist / range);
+    const f = baseForce * falloff * b.mass;
+    // 순수 방사형 반동 (위쪽 편향 제거 — 작은 공이 천장까지 튀어 끼는 것 방지)
+    Body.applyForce(b, b.position, {
+      x: (dx / dist) * f,
+      y: (dy / dist) * f,
+    });
+  }
+}
+
+function addShake(mag) {
+  shake.mag = Math.min(20, Math.max(shake.mag, mag));
+}
+
+function showComboToast(n) {
+  comboToast.textContent = `${n} COMBO!`;
+  comboToast.classList.remove('show');
+  void comboToast.offsetWidth; // 리플로우로 재시작
+  comboToast.classList.add('show');
+  clearTimeout(showComboToast._t);
+  showComboToast._t = setTimeout(() => comboToast.classList.remove('show'), 700);
+}
+
+// ---------------- 파티클 ----------------
+function spawnMergeParticles(x, y, color) {
+  const count = 14;
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.3;
+    const speed = 2 + Math.random() * 3.5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1.0, color,
+      size: 2 + Math.random() * 2.5
+    });
+  }
+}
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.15;
+    p.life -= 0.035;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------------- 낙하 ----------------
+function randomDropTier() {
+  return Math.random() < 0.5 ? 0 : 1;
+}
+function tryDrop(x) {
+  if (isGameOver || isPaused) return;
+  const now = performance.now();
+  if (now - lastDropTime < DROP_COOLDOWN_MS) return;
+
+  ensureAudio();
+  const tier = nextTier;
+  const r = TIERS[tier].radius;
+  const clampedX = Math.max(r + 2, Math.min(WIDTH - r - 2, x));
+  const newBody = createBody(clampedX, Math.min(r + 5, DEAD_LINE_Y - r - 5), tier);
+
+  setTimeout(() => {
+    // 800ms 사이에 이미 병합/제거된 공이라면 추가하지 않음 (phantom 침범 방지)
+    if (newBody && !isGameOver && !newBody._removed) {
+      droppedBodies.add(newBody);
+    }
+  }, 800);
+
+  sndDrop();
+  lastDropTime = now;
+  // 큐에서 다음 공을 꺼내고, 새 공을 큐 뒤에 추가
+  nextTier = nextQueue.length > 0 ? nextQueue.shift() : randomDropTier();
+  nextQueue.push(randomDropTier());
+  updateNextUI();
+  // 헬 모드: 낙하 타이머 재시작
+  resetHellDropTimer();
+}
+
+// ---------------- 입력 ----------------
+function getCanvasX(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  return (clientX - rect.left) * (WIDTH / rect.width);
+}
+function getCanvasY(clientY) {
+  const rect = canvas.getBoundingClientRect();
+  return (clientY - rect.top) * (HEIGHT / rect.height);
+}
+canvas.addEventListener('mousemove', e => { aimX = getCanvasX(e.clientX); });
+canvas.addEventListener('mousedown', e => {
+  const cx = getCanvasX(e.clientX);
+  const cy = getCanvasY(e.clientY);
+  if (blackholeTargeting) { tryBlackholeRemoveAt(cx, cy); return; }
+  aimX = cx; tryDrop(cx);
+});
+// 모바일: 탭에서만 떨어뜨리고, 드래그는 조준만
+let _touchStartX = 0, _touchStartY = 0, _touchStartTime = 0, _touchMoved = false;
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (e.touches.length > 0) {
+    const cx = getCanvasX(e.touches[0].clientX);
+    const cy = getCanvasY(e.touches[0].clientY);
+    aimX = cx;
+    _touchStartX = cx; _touchStartY = cy;
+    _touchStartTime = performance.now();
+    _touchMoved = false;
+  }
+}, { passive: false });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length > 0) {
+    const cx = getCanvasX(e.touches[0].clientX);
+    const cy = getCanvasY(e.touches[0].clientY);
+    aimX = cx;
+    const dx = cx - _touchStartX;
+    const dy = cy - _touchStartY;
+    if (Math.hypot(dx, dy) > 10) _touchMoved = true; // 드래그로 간주
+  }
+  e.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  if (e.changedTouches.length === 0) return;
+  const tEnd = performance.now();
+  const cx = getCanvasX(e.changedTouches[0].clientX);
+  const cy = getCanvasY(e.changedTouches[0].clientY);
+  // 블랙홀 타겟팅은 위치 기준
+  if (blackholeTargeting) { tryBlackholeRemoveAt(cx, cy); return; }
+  // 탭 판정: 짧은 시간(500ms 이하) + 거의 안 움직임
+  const elapsed = tEnd - _touchStartTime;
+  if (!_touchMoved && elapsed < 500) {
+    aimX = cx;
+    tryDrop(cx);
+  }
+}, { passive: false });
+
+// 스페이스바: 일시정지
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+});
+
+// ---------------- 별자리 그리기 ----------------
+function drawConstellation(targetCtx, cx, cy, radius, tier, scale = 1) {
+  const pat = CONSTELLATIONS[tier];
+  if (!pat) return;
+  const r = radius * 0.7 * scale;
+
+  // 단일 별: 4꼭지점 별 + 강한 글로우
+  if (pat.single) {
+    const starR = radius * 0.55 * scale;
+    targetCtx.save();
+    targetCtx.translate(cx, cy);
+    targetCtx.fillStyle = '#fff';
+    targetCtx.shadowColor = '#fff';
+    targetCtx.shadowBlur = starR * 1.5;
+    targetCtx.beginPath();
+    // 4꼭지점 별 모양 (수평/수직으로 길고 대각선은 짧게)
+    const tips = 4, outer = starR, inner = starR * 0.32;
+    for (let i = 0; i < tips * 2; i++) {
+      const a = (i * Math.PI) / tips - Math.PI / 2;
+      const rr = (i % 2 === 0) ? outer : inner;
+      const px = Math.cos(a) * rr, py = Math.sin(a) * rr;
+      if (i === 0) targetCtx.moveTo(px, py);
+      else targetCtx.lineTo(px, py);
+    }
+    targetCtx.closePath();
+    targetCtx.fill();
+    targetCtx.shadowBlur = 0;
+    targetCtx.restore();
+    return;
+  }
+
+  // 선
+  targetCtx.strokeStyle = 'rgba(255,255,255,0.5)';
+  targetCtx.lineWidth = Math.max(0.8, radius * 0.025);
+  for (const [i, j] of pat.lines) {
+    const a = pat.stars[i], b = pat.stars[j];
+    targetCtx.beginPath();
+    targetCtx.moveTo(cx + a[0] * r, cy + a[1] * r);
+    targetCtx.lineTo(cx + b[0] * r, cy + b[1] * r);
+    targetCtx.stroke();
+  }
+  // 점
+  targetCtx.fillStyle = '#fff';
+  for (const s of pat.stars) {
+    const sx = cx + s[0] * r, sy = cy + s[1] * r;
+    const dotR = Math.max(1.5, radius * 0.06);
+    // 글로우
+    targetCtx.shadowColor = '#fff';
+    targetCtx.shadowBlur = dotR * 2;
+    targetCtx.beginPath();
+    targetCtx.arc(sx, sy, dotR, 0, Math.PI * 2);
+    targetCtx.fill();
+  }
+  targetCtx.shadowBlur = 0;
+}
+
+// ---------------- 렌더링 ----------------
+function render() {
+  // 화면 흔들림 감쇠
+  if (shake.mag > 0.1) {
+    shake.x = (Math.random() - 0.5) * shake.mag;
+    shake.y = (Math.random() - 0.5) * shake.mag;
+    shake.mag *= 0.85;
+  } else {
+    shake.x = shake.y = 0;
+  }
+
+  ctx.save();
+  ctx.translate(shake.x, shake.y);
+  ctx.clearRect(-shake.x, -shake.y, WIDTH, HEIGHT);
+
+  drawBackgroundStars();
+
+  // 데드라인 (위험 시 깜빡임)
+  const danger = deadLineEnterTime !== null;
+  if (danger) {
+    const t = (performance.now() / 200) % 1;
+    ctx.strokeStyle = `rgba(255, 60, 60, ${0.4 + Math.abs(Math.sin(t * Math.PI)) * 0.5})`;
+    ctx.lineWidth = 2.5;
+  } else {
+    ctx.strokeStyle = 'rgba(255, 80, 80, 0.5)';
+    ctx.lineWidth = 1.5;
+  }
+  ctx.setLineDash([6, 6]);
+  ctx.beginPath();
+  ctx.moveTo(0, DEAD_LINE_Y);
+  ctx.lineTo(WIDTH, DEAD_LINE_Y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  container.classList.toggle('danger', danger);
+
+  // 천체
+  const bodies = Composite.allBodies(world);
+  const now = performance.now();
+  for (const body of bodies) {
+    if (body.label !== 'star') continue;
+    const data = TIERS[body.tier];
+    const { x, y } = body.position;
+
+    // 팝 애니메이션 스케일
+    let scale = 1;
+    const pop = popAnims.get(body);
+    if (pop) {
+      const t = (now - pop.start) / pop.duration;
+      if (t >= 1) popAnims.delete(body);
+      else scale = 1 + Math.sin(t * Math.PI) * 0.35;
+    }
+
+    const baseR = body.customRadius ?? data.radius;
+    const r = baseR * scale;
+    const customImg = loadedImages[body.tier];
+
+    // 1) 색 원 배경 — 충돌 반지름과 동일한 크기로 그려서 시각=경계 일치
+    const grad = ctx.createRadialGradient(x, y, r * 0.2, x, y, r);
+    grad.addColorStop(0, lighten(data.color, 0.5));
+    grad.addColorStop(1, data.color);
+    ctx.globalAlpha = 0.55; // 좀 더 진하게 — 공의 실제 경계가 잘 보이도록
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (body.isViolating) {
+      // 침범 중인 공에 강렬한 빨간 외곽선 + 펄싱 글로우 + 상단 ⚠ 마커
+      const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 120);
+      ctx.strokeStyle = `rgba(255, 23, 68, ${pulse})`;
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#FF1744';
+      ctx.shadowBlur = 18 + pulse * 6;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      // 위쪽에 경고 아이콘 (캔버스 안쪽으로 클램프해서 항상 보이도록)
+      const warnSize = Math.max(18, r * 0.45);
+      const warnX = Math.max(warnSize / 2, Math.min(WIDTH - warnSize / 2, x));
+      const warnY = Math.max(warnSize / 2 + 2, y - r - 8);
+      ctx.fillStyle = '#FF1744';
+      ctx.font = `bold ${warnSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 6;
+      ctx.fillText('⚠', warnX, warnY);
+      ctx.shadowBlur = 0;
+    } else {
+      // 외곽선을 또렷하게 그려서 충돌 경계를 명확히 시각화
+      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+    }
+
+    // 2) PNG가 있으면 회전 따라 그리기, 없으면 별자리 도트 패턴
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(body.angle);
+    if (customImg) {
+      // PNG의 SEC(최소 외접원)이 충돌 원과 일치하게 정렬한 뒤 75%로 축소
+      // 중심 좌표는 그대로 두고 크기만 줄임
+      const sec = tierImageSEC[body.tier];
+      if (sec && sec.r > 0) {
+        const s = (r / sec.r) * 0.75;
+        const iw = customImg.width * s;
+        const ih = customImg.height * s;
+        const dx = -sec.cx * s;
+        const dy = -sec.cy * s;
+        ctx.drawImage(customImg, dx, dy, iw, ih);
+      } else {
+        // SEC 계산 실패 시 fallback: 원 지름에 맞춤
+        const aspect = customImg.width / customImg.height;
+        const size = r * 2;
+        let iw, ih;
+        if (aspect >= 1) { iw = size; ih = size / aspect; }
+        else             { ih = size; iw = size * aspect; }
+        ctx.drawImage(customImg, -iw / 2, -ih / 2, iw, ih);
+      }
+    } else {
+      drawConstellation(ctx, 0, 0, data.radius, body.tier, scale);
+    }
+    ctx.restore();
+
+    // 3) 단계 이름 라벨 (회전 무시, 캔버스 안에 클램프)
+    // 1단계(별, tier 0)은 작아서 라벨 표시 생략
+    if (body.tier !== 0) {
+      // 단계별 폰트 크기 직접 지정 (별/tier 0은 라벨 없음)
+      // 1:남십자, 2:조랑말, 3:화살, 4:오리온, 5:백조, 6:사자, 7:페가수스, 8:큰곰, 9:처녀, 10:바다뱀
+      const TIER_LABEL_FONTS = [0, 11, 12, 14, 16, 18, 20, 22, 24, 30, 38];
+      const labelFont = TIER_LABEL_FONTS[body.tier] || 14;
+      let labelY = y + r * 0.55;
+      labelY = Math.max(labelFont, Math.min(HEIGHT - labelFont, labelY));
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      ctx.font = `bold ${labelFont}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 3;
+      ctx.fillText(tierName(body.tier), x, labelY);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  drawAimGuide();
+  updateParticles();
+  drawParticles();
+
+  ctx.restore();
+  requestAnimationFrame(render);
+}
+
+function drawAimGuide() {
+  if (isGameOver || isPaused) return;
+  const data = TIERS[nextTier];
+  const r = data.radius;
+  const x = Math.max(r + 2, Math.min(WIDTH - r - 2, aimX));
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.setLineDash([4, 6]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, HEIGHT);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const previewY = Math.min(r + 5, DEAD_LINE_Y - r - 5);
+  const customImg = loadedImages[nextTier];
+
+  // 옅은 원 배경
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = data.color;
+  ctx.beginPath();
+  ctx.arc(x, previewY, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  // PNG 또는 별자리 패턴 (SEC 기반 정렬)
+  ctx.globalAlpha = 0.85;
+  if (customImg) {
+    const sec = tierImageSEC[nextTier];
+    if (sec && sec.r > 0) {
+      const s = (r / sec.r) * 0.75;
+      ctx.drawImage(customImg, x - sec.cx * s, previewY - sec.cy * s, customImg.width * s, customImg.height * s);
+    } else {
+      const aspect = customImg.width / customImg.height;
+      const size = r * 1.85;
+      let iw, ih;
+      if (aspect >= 1) { iw = size; ih = size / aspect; }
+      else             { ih = size; iw = size * aspect; }
+      ctx.drawImage(customImg, x - iw / 2, previewY - ih / 2, iw, ih);
+    }
+  } else {
+    drawConstellation(ctx, x, previewY, r, nextTier, 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------------- 배경 별 (반짝임) ----------------
+let bgStars = [];
+function initBgStars() {
+  bgStars = [];
+  for (let i = 0; i < 50; i++) {
+    bgStars.push({
+      x: Math.random() * WIDTH,
+      y: Math.random() * HEIGHT,
+      r: Math.random() * 1.2 + 0.3,
+      a: Math.random() * 0.5 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.5 + Math.random() * 1.5
+    });
+  }
+}
+function drawBackgroundStars() {
+  // 사용자 배경 이미지가 있으면 먼저 그리기
+  if (bgImage) {
+    ctx.drawImage(bgImage, 0, 0, WIDTH, HEIGHT);
+  }
+  ctx.fillStyle = '#fff';
+  const t = performance.now() / 1000;
+  for (const s of bgStars) {
+    const twinkle = 0.5 + 0.5 * Math.sin(t * s.speed + s.phase);
+    ctx.globalAlpha = s.a * (0.5 + 0.5 * twinkle);
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function lighten(hex, amt) {
+  const c = hex.replace('#', '');
+  const r = Math.min(255, parseInt(c.substr(0, 2), 16) + Math.floor(255 * amt));
+  const g = Math.min(255, parseInt(c.substr(2, 2), 16) + Math.floor(255 * amt));
+  const b = Math.min(255, parseInt(c.substr(4, 2), 16) + Math.floor(255 * amt));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ---------------- UI 업데이트 ----------------
+function updateScoreUI() {
+  scoreEl.textContent = score;
+  if (score > bestScore) {
+    bestScore = score;
+    localStorage.setItem('constellation_best', bestScore);
+  }
+  bestScoreEl.textContent = bestScore;
+}
+
+// NEXT 큐: 헤더에 슬롯 N개를 표시 (난이도별 nextCount)
+const nextQueueEl = document.getElementById('nextQueue');
+function drawSlotCanvas(canvas, tier) {
+  const ctx2 = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx2.clearRect(0, 0, W, H);
+  const data = TIERS[tier];
+  const r = Math.min(W, H) / 2 - 4;
+  const grad = ctx2.createRadialGradient(W/2, H/2, r * 0.2, W/2, H/2, r);
+  grad.addColorStop(0, lighten(data.color, 0.5));
+  grad.addColorStop(1, data.color);
+  ctx2.globalAlpha = 0.35;
+  ctx2.fillStyle = grad;
+  ctx2.beginPath(); ctx2.arc(W/2, H/2, r, 0, Math.PI * 2); ctx2.fill();
+  ctx2.globalAlpha = 1;
+  const img = loadedImages[tier];
+  if (img) {
+    const sec = tierImageSEC[tier];
+    if (sec && sec.r > 0) {
+      const s = (r / sec.r) * 0.75;
+      ctx2.drawImage(img, W/2 - sec.cx * s, H/2 - sec.cy * s, img.width * s, img.height * s);
+    } else {
+      const aspect = img.width / img.height;
+      const size = r * 1.85;
+      let iw, ih;
+      if (aspect >= 1) { iw = size; ih = size / aspect; }
+      else             { ih = size; iw = size * aspect; }
+      ctx2.drawImage(img, W/2 - iw/2, H/2 - ih/2, iw, ih);
+    }
+  } else {
+    drawConstellation(ctx2, W/2, H/2, r, tier, 1);
+  }
+}
+function updateNextUI() {
+  const cfg = DIFFICULTIES[currentDifficulty];
+  const showCount = cfg ? cfg.nextCount : 1;
+  nextQueueEl.innerHTML = '';
+  if (showCount === 0) {
+    // 헬 모드: NEXT 박스 숨김
+    document.querySelector('.next-block').style.display = 'none';
+    return;
+  }
+  document.querySelector('.next-block').style.display = '';
+  // 큐가 부족하면 임시로 채움
+  while (nextQueue.length < showCount) nextQueue.push(randomDropTier());
+  for (let i = 0; i < showCount; i++) {
+    const tier = nextQueue[i];
+    const slot = document.createElement('div');
+    slot.className = 'next-slot';
+    const c = document.createElement('canvas');
+    // 첫 슬롯(next1)은 기본 크기, 그 이후(next2..)는 점점 작게
+    const sizes = [60, 40, 32];
+    const cssSizes = [40, 26, 22];
+    const px = sizes[Math.min(i, sizes.length - 1)];
+    const cssPx = cssSizes[Math.min(i, cssSizes.length - 1)];
+    c.width = px; c.height = px;
+    c.style.width = cssPx + 'px';
+    c.style.height = cssPx + 'px';
+    drawSlotCanvas(c, tier);
+    slot.appendChild(c);
+    const lbl = document.createElement('span');
+    lbl.className = 'slot-label';
+    lbl.style.fontSize = (i === 0 ? 9 : 8) + 'px';
+    lbl.textContent = tierName(tier);
+    slot.appendChild(lbl);
+    nextQueueEl.appendChild(slot);
+  }
+}
+
+// ---------------- 게임 오버 ----------------
+function checkGameOver() {
+  if (isGameOver) return;
+  const now = performance.now();
+
+  // 알고리즘:
+  //  - 공 테두리(top edge)가 빨간선 위에 있고 + 속도가 낮으면 침범
+  //  - 한 공이라도 침범 중이면 글로벌 카운터 유지
+  //  - 침범 중인 공이 0개가 되면 즉시 리셋
+  // 디버그: 어떤 공이 카운트를 유지시키는지 시각화하기 위해 body.isViolating 플래그를 매 프레임 갱신
+  let anyViolating = false;
+  for (const body of droppedBodies) {
+    if (!body || !body.position) { continue; }
+    const bodyR = body.customRadius ?? TIERS[body.tier].radius;
+    const top = body.position.y - bodyR;
+    const bottom = body.position.y + bodyR;
+    // 침범 조건 = 공이 빨간선과 실제로 "맞닿아 있는" 상태
+    //   - 공의 윗부분이 빨간선 위 (top < DEAD_LINE_Y)
+    //   - AND 공의 아랫부분이 빨간선 또는 그 아래 (bottom >= DEAD_LINE_Y)
+    //   = 공이 빨간선을 가로지르고 있어야 함
+    // → 화면 위로 완전히 벗어난 공은 빨간선과 닿지 않으므로 카운트 안 됨
+    const touching = (top < DEAD_LINE_Y) && (bottom >= DEAD_LINE_Y);
+    if (!touching) {
+      body.isViolating = false;
+      continue;
+    }
+    const vx = Math.abs(body.velocity.x);
+    const vy = Math.abs(body.velocity.y);
+    const isResting = vx < 0.8 && vy < 0.8;
+    body.isViolating = isResting;
+    if (isResting) anyViolating = true;
+  }
+
+  if (anyViolating) {
+    if (deadLineEnterTime === null) {
+      deadLineEnterTime = now;
+      _deadlineTriggeredThisGame = true; // 한 방 컷 업적 자격 박탈
+    }
+    else if (now - deadLineEnterTime >= DEAD_LINE_GRACE_MS) triggerGameOver();
+  } else {
+    // 데드라인에서 탈출한 케이스 (시작했다가 풀림) → 카운트 누적
+    if (deadLineEnterTime !== null) {
+      stats.deadlineEscapeCount = (stats.deadlineEscapeCount || 0) + 1;
+      saveStats();
+    }
+    deadLineEnterTime = null;
+  }
+  updateDeadlineCountdown();
+
+  // 안전망: 화면 밖이거나 매우 높은 곳에 끼어 있는 별(tier 0)은 자동 제거
+  // (시각적으로 안 보이는 작은 공이 카운트를 트리거하는 케이스 방지)
+  for (const body of Array.from(droppedBodies)) {
+    if (!body || !body.position) continue;
+    const escaped = body.position.y < -10 || body.position.x < -50 || body.position.x > WIDTH + 50;
+    if (escaped) {
+      droppedBodies.delete(body);
+      World.remove(world, body);
+    }
+  }
+}
+
+// 데드라인 카운트다운 UI
+const deadlineCountdownEl = document.getElementById('deadlineCountdown');
+function updateDeadlineCountdown() {
+  if (deadLineEnterTime === null || isGameOver) {
+    deadlineCountdownEl.classList.remove('show');
+    return;
+  }
+  const remain = Math.max(0, (DEAD_LINE_GRACE_MS - (performance.now() - deadLineEnterTime)) / 1000);
+  deadlineCountdownEl.textContent = remain.toFixed(1);
+  deadlineCountdownEl.classList.add('show');
+}
+
+function triggerGameOver() {
+  isGameOver = true;
+  // 게임오버 순간의 화면 상태를 그대로 동결 (어떤 공이 침범했는지 명확히 보이게)
+  stopPhysicsLoop();
+  finalScoreEl.textContent = score;
+  const isNewBest = score >= bestScore && score > 0;
+  newBestMsg.style.display = isNewBest ? 'block' : 'none';
+  newBestMsg.textContent = t('newBest');
+  // 어려움 모드에서 클리어와 함께 게임오버된 경우: GAME OVER → 🎉 클리어!
+  const gameOverHeader = document.querySelector('#gameOverOverlay h2');
+  if (gameOverHeader) {
+    if (currentDifficulty === 'hard' && _clearedThisGame) {
+      gameOverHeader.textContent = t('clearTitle');
+      gameOverHeader.style.color = '#FFD700';
+    } else {
+      gameOverHeader.textContent = t('gameOver');
+      gameOverHeader.style.color = '#FF6B6B';
+    }
+  }
+  gameOverOverlay.classList.add('show');
+  sndGameOver();
+  addShake(12);
+  // 통계 누적 (게임 종료 시점)
+  stats.totalGames++;
+  stats.totalScore += score;
+  // 플레이 시간 누적
+  const elapsedSec = Math.max(0, (performance.now() - _gameStartTime) / 1000);
+  stats.totalPlayTimeSec = (stats.totalPlayTimeSec || 0) + elapsedSec;
+  // 최장 콤보 갱신
+  if (_maxComboThisGame > (stats.maxComboEver || 0)) stats.maxComboEver = _maxComboThisGame;
+  // 신기록 갱신 카운트
+  if (score >= bestScore && score > 0) stats.newBestCount = (stats.newBestCount || 0) + 1;
+  // 난이도별 통계
+  stats.bestByDiff = stats.bestByDiff || {};
+  stats.scoreSumByDiff = stats.scoreSumByDiff || {};
+  stats.attemptsByDiff = stats.attemptsByDiff || {};
+  stats.bestByDiff[currentDifficulty] = Math.max(stats.bestByDiff[currentDifficulty] || 0, score);
+  stats.scoreSumByDiff[currentDifficulty] = (stats.scoreSumByDiff[currentDifficulty] || 0) + score;
+  stats.attemptsByDiff[currentDifficulty] = (stats.attemptsByDiff[currentDifficulty] || 0) + 1;
+  // 헬 모드 경고 누적
+  if (currentDifficulty === 'hell') stats.hellWarningTotal = (stats.hellWarningTotal || 0) + hellWarnings;
+  // 마지막 플레이 날짜 (오늘 날짜)
+  const today = new Date().toISOString().slice(0, 10);
+  if (!stats.firstPlayDate) stats.firstPlayDate = today;
+  stats.lastPlayDate = today;
+  saveStats();
+  // 점수 업적
+  if (score >= 1000)   unlockAchievement('score1k');
+  if (score >= 10000)  unlockAchievement('score10k');
+  if (score >= 50000)  unlockAchievement('score50k');
+  // 누적 점수 업적
+  if (stats.totalScore >= 100000) unlockAchievement('score100k');
+  // 백전노장: 100판 플레이
+  if (stats.totalGames >= 100) unlockAchievement('play100');
+  // 거북이: 30분 이상 한 게임
+  if (elapsedSec >= 1800) unlockAchievement('turtle30');
+  // 균형: 30회+ 병합 + 좌/우 차이 5 이내
+  if (_mergeCountThisGame >= 30 && Math.abs(_leftMergesThisGame - _rightMergesThisGame) <= 5) {
+    unlockAchievement('balance');
+  }
+}
+
+// ---------------- 일시정지 ----------------
+function pauseGame() {
+  if (isGameOver || isPaused) return;
+  isPaused = true;
+  _pausedThisGame = true; // 무위 업적 자격 박탈
+  stopPhysicsLoop();
+  pauseBtn.textContent = '▶';
+}
+function resumeGame() {
+  if (isGameOver || !isPaused) return;
+  isPaused = false;
+  startPhysicsLoop();
+  pauseBtn.textContent = '⏸';
+}
+function togglePause() {
+  if (isGameOver) return;
+  // 일시정지 버튼은 일시정지 메뉴를 띄우는 역할 (재개는 메뉴 안의 버튼으로)
+  if (!isPaused) {
+    pauseGame();
+    openPauseMenu();
+  } else {
+    // 이미 일시정지된 상태에서 다시 누르면 메뉴 토글
+    if (document.getElementById('pauseModal').classList.contains('show')) {
+      closeModal(document.getElementById('pauseModal'));
+      resumeGame();
+    } else {
+      openPauseMenu();
+    }
+  }
+}
+pauseBtn.addEventListener('click', togglePause);
+
+// ---------------- 블랙홀 아이템 (타겟팅 모드) ----------------
+// 버튼 클릭 → 타겟팅 모드 활성화 → 캔버스에서 별을 클릭하면 그 별 제거
+let blackholeTargeting = false;
+function activateBlackholeTargeting() {
+  if (isGameOver || isPaused) return;
+  const cfg = DIFFICULTIES[currentDifficulty];
+  // 쿨타임 체크 (cd가 0이면 무시)
+  const now = performance.now();
+  if (cfg.blackholeCd > 0 && now - lastBlackholeTime < cfg.blackholeCd) return;
+  // 횟수 체크 (-1 = 무제한)
+  if (cfg.blackholeMax !== -1 && blackholeUses <= 0) return;
+  blackholeTargeting = !blackholeTargeting;
+  blackholeBtn.classList.toggle('targeting', blackholeTargeting);
+  container.classList.toggle('targeting', blackholeTargeting);
+}
+
+// 캔버스에서 클릭한 위치의 별을 찾아 제거
+function tryBlackholeRemoveAt(x, y) {
+  const bodies = Composite.allBodies(world).filter(b => b.label === 'star');
+  // 클릭 좌표 위에 있는 별 (가장 위에 그려진 = 마지막에 추가된 우선)
+  let target = null;
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    const b = bodies[i];
+    const dx = x - b.position.x;
+    const dy = y - b.position.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= TIERS[b.tier].radius) {
+      target = b; break;
+    }
+  }
+  if (!target) return false;
+  // 제거 + 이펙트
+  spawnMergeParticles(target.position.x, target.position.y, TIERS[target.tier].color);
+  target._removed = true;
+  droppedBodies.delete(target);
+  World.remove(world, target);
+  score += (target.tier + 1) * 5;
+  updateScoreUI();
+  ensureAudio();
+  sndBlackhole();
+  addShake(6);
+  // 사용 처리: 쿨타임 + 횟수 차감
+  lastBlackholeTime = performance.now();
+  const cfg = DIFFICULTIES[currentDifficulty];
+  if (cfg.blackholeMax !== -1) blackholeUses = Math.max(0, blackholeUses - 1);
+  _blackholeUsedThisGame = true;
+  // 블랙홀 사용 횟수 = 제거한 별 수 (동일 카운터)
+  stats.blackholeUseCount = (stats.blackholeUseCount || 0) + 1;
+  saveStats();
+  // 타겟팅 모드 종료
+  blackholeTargeting = false;
+  blackholeBtn.classList.remove('targeting');
+  container.classList.remove('targeting');
+  return true;
+}
+
+blackholeBtn.addEventListener('click', activateBlackholeTargeting);
+
+function updateBlackholeBtn() {
+  const cfg = DIFFICULTIES[currentDifficulty] || DIFFICULTIES.medium;
+  const cdRemain = cfg.blackholeCd - (performance.now() - lastBlackholeTime);
+  const cdActive = cfg.blackholeCd > 0 && cdRemain > 0;
+  const usesExhausted = (cfg.blackholeMax !== -1) && blackholeUses <= 0;
+  blackholeBtn.disabled = isGameOver || isPaused || cdActive || usesExhausted;
+  // 표시 텍스트
+  let suffix = '';
+  if (cdActive) {
+    suffix = `(${Math.ceil(cdRemain / 1000)}s)`;
+  } else if (cfg.blackholeMax === -1) {
+    suffix = ''; // 무제한
+  } else {
+    suffix = `x${blackholeUses}`;
+  }
+  blackholeCdEl.textContent = suffix;
+  requestAnimationFrame(updateBlackholeBtn);
+}
+updateBlackholeBtn();
+
+// ---------------- 재시작 ----------------
+function resetGame() {
+  if (engine) {
+    Events.off(engine, 'collisionStart', handleCollision);
+    Events.off(engine, 'afterUpdate');
+    stopPhysicsLoop();
+    World.clear(engine.world, false);
+    Engine.clear(engine);
+  }
+  score = 0;
+  lastDropTime = 0;
+  // 난이도 적용
+  const cfg = DIFFICULTIES[currentDifficulty] || DIFFICULTIES.medium;
+  nextQueue = [];
+  for (let i = 0; i < Math.max(1, cfg.nextCount); i++) nextQueue.push(randomDropTier());
+  // 첫 떨어뜨릴 공
+  nextTier = randomDropTier();
+  blackholeUses = cfg.blackholeMax === -1 ? -1 : cfg.blackholeMax;
+  hellWarnings = 0;
+  hellDropDeadline = null;
+  dropTimerActive = false;
+  _clearedThisGame = false;
+  _blackholeUsedThisGame = false;
+  _gameStartTime = performance.now();
+  _maxComboThisGame = 0;
+  _mergeCountThisGame = 0;
+  _deadlineTriggeredThisGame = false;
+  _pausedThisGame = false;
+  _leftMergesThisGame = 0;
+  _rightMergesThisGame = 0;
+  _recentMergeTimes = [];
+  hellBarEl.classList.remove('active');
+  updateHellWarnDots();
+  resetHellDropTimer();
+  isGameOver = false;
+  isPaused = false;
+  deadLineEnterTime = null;
+  droppedBodies.clear();
+  particles = [];
+  popAnims.clear();
+  combo = 0;
+  lastMergeTime = 0;
+  lastBlackholeTime = -Infinity;
+  shake = { x: 0, y: 0, mag: 0 };
+  blackholeTargeting = false;
+  unlockedTiers.clear();
+  buildTierProgress();
+  container.classList.remove('paused', 'danger', 'targeting');
+  blackholeBtn.classList.remove('targeting');
+  pauseBtn.textContent = '⏸';
+  gameOverOverlay.classList.remove('show');
+  bestScoreEl.textContent = bestScore;
+  updateScoreUI();
+  updateNextUI();
+  initBgStars();
+  initEngine();
+}
+restartBtn.addEventListener('click', resetGame);
+
+// ---------------- 헬 모드 타이머 ----------------
+function resetHellDropTimer() {
+  const cfg = DIFFICULTIES[currentDifficulty];
+  if (!cfg || cfg.dropTimer <= 0) {
+    dropTimerActive = false;
+    hellDropDeadline = null;
+    hellBarEl.classList.remove('active');
+    return;
+  }
+  dropTimerActive = true;
+  hellDropDeadline = performance.now() + cfg.dropTimer;
+  hellBarEl.classList.add('active');
+}
+function updateHellWarnDots() {
+  const dots = hellWarnsEl.querySelectorAll('.warn-dot');
+  dots.forEach((d, i) => d.classList.toggle('on', i < hellWarnings));
+}
+function tickHellTimer() {
+  if (!dropTimerActive || isPaused || isGameOver) {
+    requestAnimationFrame(tickHellTimer);
+    return;
+  }
+  const cfg = DIFFICULTIES[currentDifficulty];
+  if (!cfg || cfg.dropTimer <= 0) {
+    requestAnimationFrame(tickHellTimer);
+    return;
+  }
+  const now = performance.now();
+  let remain = (hellDropDeadline - now) / 1000;
+  if (remain <= 0) {
+    // 시간 초과: 경고 누적
+    hellWarnings++;
+    updateHellWarnDots();
+    if (hellWarnings >= 3) {
+      triggerGameOver();
+      requestAnimationFrame(tickHellTimer);
+      return;
+    }
+    // 다음 시도 위해 타이머 재시작
+    hellDropDeadline = now + cfg.dropTimer;
+    remain = cfg.dropTimer / 1000;
+    addShake(5);
+  }
+  hellTimerEl.textContent = remain.toFixed(1) + 's';
+  hellTimerEl.classList.toggle('danger', remain <= 1.5);
+  requestAnimationFrame(tickHellTimer);
+}
+tickHellTimer();
+
+// ---------------- 클리어 추적 ----------------
+// 난이도별 클리어 조건 (도달해야 하는 tier index)
+//   쉬움 → 큰곰(8), 중간 → 처녀(9), 어려움 → 바다뱀(10), 헬 → 바다뱀(10)
+const CLEAR_TIER = { easy: 8, medium: 9, hard: 10, hell: 10 };
+let _clearedThisGame = false; // 한 게임 내 중복 카운트 방지
+let _blackholeUsedThisGame = false;
+let _gameStartTime = 0;
+// 한 게임 내 추적 (업적/통계용)
+let _maxComboThisGame = 0;
+let _mergeCountThisGame = 0;
+let _deadlineTriggeredThisGame = false; // 데드라인 카운트가 한 번이라도 시작되면 true
+let _pausedThisGame = false;
+let _leftMergesThisGame = 0;
+let _rightMergesThisGame = 0;
+let _recentMergeTimes = [];        // 최근 병합 타임스탬프 (비트박스 판정용)
+let _deadlinePrev = null;          // 직전 프레임의 deadLineEnterTime (escape 감지)
+function checkClearedDifficulty(reachedTier) {
+  if (_clearedThisGame) return;
+  const need = CLEAR_TIER[currentDifficulty];
+  if (reachedTier < need) return;
+  if (!stats.cleared) stats.cleared = {};
+  // 클리어 횟수 누적 (boolean이었던 기존값 호환)
+  const prev = stats.cleared[currentDifficulty];
+  const prevCount = (typeof prev === 'number') ? prev : (prev ? 1 : 0);
+  stats.cleared[currentDifficulty] = prevCount + 1;
+  _clearedThisGame = true;
+  saveStats();
+  // 난이도별 클리어 업적
+  const clearAchMap = { easy: 'easyClear', medium: 'mediumClear', hard: 'hardClear', hell: 'hellClear' };
+  if (clearAchMap[currentDifficulty]) unlockAchievement(clearAchMap[currentDifficulty]);
+  if (isAllNonHellCleared()) unlockAchievement('allCleared');
+  // 부가 업적: 블랙홀 미사용 클리어, 스피드런(3분 이내)
+  if (!_blackholeUsedThisGame) unlockAchievement('noBlackhole');
+  const elapsedSec = (performance.now() - _gameStartTime) / 1000;
+  if (elapsedSec <= 480) unlockAchievement('speedy');           // 8분 이내
+  // 한 방 컷: 데드라인 카운트 한 번도 안 됨
+  if (!_deadlineTriggeredThisGame) unlockAchievement('noDeadline');
+  // 무위: 일시정지 없이 클리어
+  if (!_pausedThisGame) unlockAchievement('noPause');
+  // 야행성: 자정~새벽 6시
+  const hour = new Date().getHours();
+  if (hour >= 0 && hour < 6) unlockAchievement('nightOwl');
+  // 클리어 최단 시간 / 최단 병합 수
+  stats.clearTimeBest = stats.clearTimeBest || {};
+  stats.clearMinMerges = stats.clearMinMerges || {};
+  const elapsedMs = elapsedSec * 1000;
+  if (!stats.clearTimeBest[currentDifficulty] || elapsedMs < stats.clearTimeBest[currentDifficulty]) {
+    stats.clearTimeBest[currentDifficulty] = elapsedMs;
+  }
+  if (!stats.clearMinMerges[currentDifficulty] || _mergeCountThisGame < stats.clearMinMerges[currentDifficulty]) {
+    stats.clearMinMerges[currentDifficulty] = _mergeCountThisGame;
+  }
+  saveStats();
+  // 스피드런 마스터: 모든 4난이도 각각 15분 이내 클리어
+  const T = stats.clearTimeBest;
+  if (T.easy && T.medium && T.hard && T.hell &&
+      T.easy <= 900000 && T.medium <= 900000 && T.hard <= 900000 && T.hell <= 900000) {
+    unlockAchievement('speedrunMaster');
+  }
+  // 난이도별 클리어 연출
+  // - 쉬움/중간: 클리어 팝업 (메인으로 / 계속하기)
+  // - 어려움: 화면 가운데 토스트 (오버사이즈 바다뱀이 곧 게임오버를 트리거)
+  // - 헬: 토스트 (게임은 계속 진행)
+  if (currentDifficulty === 'easy' || currentDifficulty === 'medium') {
+    openClearModal(currentDifficulty);
+  } else {
+    showClearToast();
+  }
+}
+
+// 클리어 팝업 (쉬움/중간)
+function openClearModal(difficulty) {
+  pauseGame();
+  const bodyEl = document.getElementById('clearBody');
+  const map = { easy: 'clearBodyEasy', medium: 'clearBodyMedium' };
+  bodyEl.textContent = t(map[difficulty] || 'clearBodyEasy');
+  openModal(document.getElementById('clearModal'));
+}
+function diffCleared(d) {
+  const v = stats.cleared && stats.cleared[d];
+  if (typeof v === 'number') return v > 0;
+  return !!v;
+}
+function diffClearCount(d) {
+  const v = stats.cleared && stats.cleared[d];
+  if (typeof v === 'number') return v;
+  return v ? 1 : 0;
+}
+function isAllNonHellCleared() {
+  return diffCleared('easy') && diffCleared('medium') && diffCleared('hard');
+}
+function isHellUnlocked() { return isAllNonHellCleared(); }
+function showClearToast() {
+  const toast = document.createElement('div');
+  toast.style.cssText = `position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+    background:linear-gradient(135deg,#FFD700,#FF8C00); color:#000; padding:18px 36px;
+    border-radius:30px; font-size:28px; font-weight:900; z-index:300;
+    box-shadow:0 6px 30px rgba(255,215,0,0.7);`;
+  toast.textContent = `🎉 ${t('cleared')}`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2200);
+}
+
+// ---------------- 화면 전환 / 시작 화면 ----------------
+const startScreenEl = document.getElementById('startScreen');
+const gameWrapEl = document.getElementById('gameWrap');
+const startGameBtn = document.getElementById('startGameBtn');
+const pauseModal = document.getElementById('pauseModal');
+const confirmMainModal = document.getElementById('confirmMainModal');
+const resumeBtn = document.getElementById('resumeBtn');
+const pauseSoundBtn = document.getElementById('pauseSoundBtn');
+const gotoMainBtn = document.getElementById('gotoMainBtn');
+const cancelMainBtn = document.getElementById('cancelMainBtn');
+const confirmMainBtn = document.getElementById('confirmMainBtn');
+const howToBtn = document.getElementById('howToBtn');
+const achievementsBtn = document.getElementById('achievementsBtn');
+const recordsBtn = document.getElementById('recordsBtn');
+const howToModal = document.getElementById('howToModal');
+const achievementsModal = document.getElementById('achievementsModal');
+const recordsModal = document.getElementById('recordsModal');
+const soundToggleBtn = document.getElementById('soundToggleBtn');
+const langToggleBtn = document.getElementById('langToggleBtn');
+
+// 시작 화면 배경 별 (캔버스)
+const startBgCanvas = document.getElementById('startBgCanvas');
+const startBgCtx = startBgCanvas.getContext('2d');
+let startBgStars = [];
+function resizeStartBg() {
+  startBgCanvas.width = window.innerWidth;
+  startBgCanvas.height = window.innerHeight;
+  startBgStars = [];
+  for (let i = 0; i < 80; i++) {
+    startBgStars.push({
+      x: Math.random() * startBgCanvas.width,
+      y: Math.random() * startBgCanvas.height,
+      r: Math.random() * 1.5 + 0.4,
+      a: Math.random() * 0.5 + 0.3,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.4 + Math.random() * 1.5
+    });
+  }
+}
+resizeStartBg();
+window.addEventListener('resize', resizeStartBg);
+function renderStartBg() {
+  if (startScreenEl.classList.contains('hidden')) {
+    requestAnimationFrame(renderStartBg);
+    return;
+  }
+  startBgCtx.clearRect(0, 0, startBgCanvas.width, startBgCanvas.height);
+  const t = performance.now() / 1000;
+  for (const s of startBgStars) {
+    const tw = 0.5 + 0.5 * Math.sin(t * s.speed + s.phase);
+    startBgCtx.globalAlpha = s.a * (0.5 + 0.5 * tw);
+    startBgCtx.fillStyle = '#fff';
+    startBgCtx.beginPath();
+    startBgCtx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    startBgCtx.fill();
+  }
+  startBgCtx.globalAlpha = 1;
+  requestAnimationFrame(renderStartBg);
+}
+renderStartBg();
+
+function showStartScreen() {
+  startScreenEl.classList.remove('hidden');
+  gameWrapEl.style.display = 'none';
+  // 게임이 진행 중이면 일시정지
+  if (engine && !isPaused && !isGameOver) {
+    isPaused = true;
+    stopPhysicsLoop();
+  }
+}
+function showGame() {
+  startScreenEl.classList.add('hidden');
+  gameWrapEl.style.display = 'flex';
+}
+
+startGameBtn.addEventListener('click', () => {
+  buildDifficultyButtons();
+  openModal(difficultyModal);
+});
+
+// 난이도 선택 모달
+function buildDifficultyButtons() {
+  diffBtnsEl.innerHTML = '';
+  const hellOpen = isHellUnlocked();
+  const list = [
+    { id: 'easy',   nameKey: 'diffEasy' },
+    { id: 'medium', nameKey: 'diffMedium' },
+    { id: 'hard',   nameKey: 'diffHard' },
+  ];
+  // 헬은 잠금 해제 시에만 노출 (잠겨있으면 버튼 자체가 안 보임)
+  if (hellOpen) list.push({ id: 'hell', nameKey: 'diffHell' });
+  for (const d of list) {
+    const btn = document.createElement('button');
+    btn.className = `diff-btn ${d.id}`;
+    const cleared = stats.cleared && stats.cleared[d.id];
+    const title = `${t(d.nameKey)}${cleared ? ' ✓' : ''}`;
+    btn.innerHTML = `<span class="diff-name">${title}</span>`;
+    btn.addEventListener('click', () => {
+      closeModal(difficultyModal);
+      beginGame(d.id);
+    });
+    diffBtnsEl.appendChild(btn);
+  }
+}
+
+function beginGame(difficulty) {
+  currentDifficulty = difficulty;
+  showGame();
+  resetGame();
+  updateDifficultyBadge();
+}
+function updateDifficultyBadge() {
+  // 헤더 SCORE 옆에 난이도 배지 표시
+  const scoreLabel = document.querySelector('.score-block .label');
+  let badge = document.getElementById('diffBadge');
+  if (!badge) {
+    badge = document.createElement('span');
+    badge.id = 'diffBadge';
+    badge.className = 'diff-badge';
+    scoreLabel.appendChild(badge);
+  }
+  badge.className = `diff-badge ${currentDifficulty}`;
+  const map = { easy: 'diffEasy', medium: 'diffMedium', hard: 'diffHard', hell: 'diffHell' };
+  badge.textContent = t(map[currentDifficulty] || 'diffMedium');
+}
+
+// 일시정지 메뉴
+function openPauseMenu() {
+  updatePauseSoundBtn();
+  openModal(pauseModal);
+}
+function updatePauseSoundBtn() {
+  pauseSoundBtn.firstChild.nodeValue = (soundEnabled ? '🔊 ' : '🔇 ');
+}
+resumeBtn.addEventListener('click', () => {
+  closeModal(pauseModal);
+  resumeGame();
+});
+pauseSoundBtn.addEventListener('click', () => {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('cm_sound', soundEnabled ? '1' : '0');
+  applySoundUI();
+  updatePauseSoundBtn();
+});
+gotoMainBtn.addEventListener('click', () => {
+  // 메인 화면 이동 전 확인
+  openModal(confirmMainModal);
+});
+cancelMainBtn.addEventListener('click', () => closeModal(confirmMainModal));
+
+// 클리어 팝업 버튼
+const clearModalEl = document.getElementById('clearModal');
+const clearMainBtn = document.getElementById('clearMainBtn');
+const clearContinueBtn = document.getElementById('clearContinueBtn');
+clearMainBtn.addEventListener('click', () => {
+  closeModal(clearModalEl);
+  showStartScreen();
+});
+clearContinueBtn.addEventListener('click', () => {
+  closeModal(clearModalEl);
+  resumeGame();
+});
+confirmMainBtn.addEventListener('click', () => {
+  closeModal(confirmMainModal);
+  closeModal(pauseModal);
+  // 게임 정리: 일시정지 상태에서 메인으로 이동
+  // 다음 게임 시작 시 resetGame이 다시 호출되므로 여기선 화면만 전환
+  showStartScreen();
+});
+
+// 모달 처리
+function openModal(el) { el.classList.add('show'); }
+function closeModal(el) { el.classList.remove('show'); }
+howToBtn.addEventListener('click', () => {
+  // 헬 잠금 상태에서는 헬 행/안내 숨김, 해제 시 자동 노출
+  const hellOpen = isHellUnlocked();
+  const html = t('howToBase')
+    + t('howToTableHead')
+    + (hellOpen ? t('howToTableHellRow') : '')
+    + t('howToTableTail')
+    + (hellOpen ? t('howToHellNote') : '');
+  document.getElementById('howToContent').innerHTML = html;
+  openModal(howToModal);
+});
+achievementsBtn.addEventListener('click', () => {
+  renderAchievements();
+  openModal(achievementsModal);
+});
+recordsBtn.addEventListener('click', () => {
+  renderRecords();
+  openModal(recordsModal);
+});
+const rankingBtn = document.getElementById('rankingBtn');
+if (rankingBtn) {
+  rankingBtn.addEventListener('click', () => {
+    // 임시 토스트 — 랭킹 시스템은 추후 업데이트 예정
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      background:linear-gradient(135deg,#37474f,#263238); color:#fff; padding:18px 30px;
+      border-radius:14px; font-size:18px; font-weight:700; z-index:300;
+      box-shadow:0 6px 24px rgba(0,0,0,0.5); text-align:center;`;
+    toast.textContent = t('rankingComingSoon');
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+  });
+}
+document.querySelectorAll('.modal-close').forEach(btn => {
+  btn.addEventListener('click', () => closeModal(btn.closest('.modal-overlay')));
+});
+document.querySelectorAll('.modal-overlay').forEach(ov => {
+  ov.addEventListener('click', e => { if (e.target === ov) closeModal(ov); });
+});
+
+function renderAchievements() {
+  const list = t('achList');
+  const html = list.map(a => {
+    const unlocked = !!stats.achievements[a.id];
+    return `<div class="achievement-item ${unlocked ? 'unlocked' : 'locked'}">
+      <div class="ach-icon">${unlocked ? a.icon : '🔒'}</div>
+      <div class="ach-info">
+        <div class="ach-name">${a.name}</div>
+        <div class="ach-desc">${a.desc}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('achievementsContent').innerHTML = html;
+}
+function renderRecords() {
+  const maxTierLabel = (stats.maxTier !== undefined && TIERS[stats.maxTier])
+    ? `${stats.maxTier + 1} (${tierName(stats.maxTier)})` : '-';
+  const fmt = (id) => `${diffClearCount(id)} ${t('statTimes')}`;
+  const hellOpen = isHellUnlocked();
+
+  // 시간 포맷
+  const fmtTime = (sec) => {
+    if (!sec) return '-';
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    return h > 0 ? `${h}h ${m}m` : (m > 0 ? `${m}m ${s}s` : `${s}s`);
+  };
+  const fmtMs = (ms) => ms ? fmtTime(ms / 1000) : '-';
+
+  // 별자리 도달 횟수: 가독성 위해 단계 1~10 모두 줄로 표시
+  const tierReachLines = [];
+  for (let i = 1; i <= 10; i++) {
+    const c = (stats.tierReachCount || {})[i] || 0;
+    if (c > 0) tierReachLines.push(`${tierName(i)} ${c}`);
+  }
+  const tierReachText = tierReachLines.length ? tierReachLines.join(', ') : '-';
+
+  // 난이도별 최단 시간
+  const ctb = stats.clearTimeBest || {};
+  const cmm = stats.clearMinMerges || {};
+  const bdf = stats.bestByDiff || {};
+  const ssd = stats.scoreSumByDiff || {};
+  const adf = stats.attemptsByDiff || {};
+  const avg = (d) => adf[d] ? Math.floor((ssd[d] || 0) / adf[d]) : 0;
+
+  const row = (label, value) => `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value">${value}</span></div>`;
+  const section = (title) => `<div style="margin-top:14px; margin-bottom:6px; font-size:13px; opacity:0.7; font-weight:700;">${title}</div>`;
+
+  let html = '';
+
+  // 누적/총합
+  html += section(t('sectionCumulative'));
+  html += row(t('statTotalGames'), `${stats.totalGames} ${t('statTimes')}`);
+  html += row(t('statBestScore'), `${bestScore} ${t('statPoints')}`);
+  html += row(t('statTotalScore'), `${stats.totalScore} ${t('statPoints')}`);
+  html += row(t('statTotalMerges'), `${stats.totalMerges} ${t('statCount')}`);
+  html += row(t('statPlayTime'), fmtTime(stats.totalPlayTimeSec || 0));
+  html += row(t('statMaxCombo'), `${stats.maxComboEver || 0}`);
+  html += row(t('statBlackholeUse'), `${stats.blackholeUseCount || 0} ${t('statTimes')}`);
+  html += row(t('statTierReach'), tierReachText);
+  html += row(t('statFirstPlay'), stats.firstPlayDate || '-');
+  html += row(t('statLastPlay'), stats.lastPlayDate || '-');
+  html += row(t('statMaxTier'), maxTierLabel);
+
+  // 난이도별 그룹 — 각 난이도마다: 클리어 / 최고점수 / 평균점수 / 최단시간 / 최소합치기
+  const diffSection = (key, label) => {
+    let s = section(label);
+    s += row(t('clearedLabel'), `${diffClearCount(key)} ${t('statTimes')}`);
+    s += row(t('statBestScore'), `${bdf[key] || 0} ${t('statPoints')}`);
+    s += row(t('statAvgByDiff'), `${avg(key)} ${t('statPoints')}`);
+    s += row(t('statClearTimeBest'), fmtMs(ctb[key]));
+    s += row(t('statClearMinMerges'), cmm[key] ? `${cmm[key]} ${t('statTimes')}` : '-');
+    return s;
+  };
+  html += diffSection('easy',   t('diffEasy'));
+  html += diffSection('medium', t('diffMedium'));
+  html += diffSection('hard',   t('diffHard'));
+  if (hellOpen) html += diffSection('hell', t('diffHell'));
+
+  // 특별 카운트
+  html += section(t('sectionSpecial'));
+  html += row(t('statDeadlineEscape'), `${stats.deadlineEscapeCount || 0} ${t('statTimes')}`);
+  html += row(t('statNewBest'), `${stats.newBestCount || 0} ${t('statTimes')}`);
+  if (hellOpen) html += row(t('statHellWarn'), `${stats.hellWarningTotal || 0} ${t('statTimes')}`);
+  html += row(t('statUiToggle'), `${stats.uiToggleCount || 0} ${t('statTimes')}`);
+
+  document.getElementById('recordsContent').innerHTML = html;
+}
+
+// 사운드 토글
+function applySoundUI() {
+  soundToggleBtn.textContent = soundEnabled ? '🔊' : '🔇';
+  if (loadedSounds.bgm) {
+    if (soundEnabled) loadedSounds.bgm.play().catch(() => {});
+    else loadedSounds.bgm.pause();
+  }
+}
+soundToggleBtn.addEventListener('click', () => {
+  soundEnabled = !soundEnabled;
+  localStorage.setItem('cm_sound', soundEnabled ? '1' : '0');
+  applySoundUI();
+  stats.uiToggleCount = (stats.uiToggleCount || 0) + 1;
+  saveStats();
+});
+
+// 언어 토글
+function applyLangUI() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (I18N[currentLang][key]) el.textContent = I18N[currentLang][key];
+  });
+  langToggleBtn.textContent = currentLang.toUpperCase();
+  // 게임 내 일부 텍스트
+  if (document.getElementById('gameOverOverlay')) {
+    const h2 = document.querySelector('#gameOverOverlay h2');
+    if (h2) h2.textContent = t('gameOver');
+    newBestMsg.textContent = t('newBest');
+    restartBtn.textContent = t('restart');
+  }
+  // 블랙홀 버튼 텍스트
+  blackholeBtn.firstChild.nodeValue = t('blackhole');
+  // 난이도 배지 다시 그리기
+  if (document.getElementById('diffBadge')) updateDifficultyBadge();
+  // 헬 모드 타이머 라벨
+  const tl = document.querySelector('.hell-bar .timer-label');
+  if (tl) tl.textContent = t('dropTimer');
+  // NEXT 큐 라벨 즉시 갱신 (한↔영 전환 반영)
+  if (typeof updateNextUI === 'function') updateNextUI();
+  // 진행바 다시 빌드 (tooltip이 새 언어 이름으로 갱신)
+  if (typeof buildTierProgress === 'function' && document.getElementById('tierProgress')) {
+    buildTierProgress();
+    if (typeof updateTierProgress === 'function') updateTierProgress();
+  }
+}
+langToggleBtn.addEventListener('click', () => {
+  currentLang = currentLang === 'ko' ? 'en' : 'ko';
+  localStorage.setItem('cm_lang', currentLang);
+  applyLangUI();
+  stats.uiToggleCount = (stats.uiToggleCount || 0) + 1;
+  saveStats();
+});
+
+// ---------------- 시작 ----------------
+preloadAssets().then(() => {
+  applyLangUI();
+  applySoundUI();
+  resetGame();
+  // 초기엔 게임 일시정지 상태로 두기 (시작 화면에서)
+  stopPhysicsLoop();
+  isPaused = true;
+  render();
+
+  // BGM 자동재생 (브라우저 정책상 사용자 입력 후 시작)
+  const startBgm = () => {
+    if (soundEnabled && loadedSounds.bgm) loadedSounds.bgm.play().catch(() => {});
+    window.removeEventListener('click', startBgm);
+    window.removeEventListener('touchstart', startBgm);
+    window.removeEventListener('keydown', startBgm);
+  };
+  window.addEventListener('click', startBgm);
+  window.addEventListener('touchstart', startBgm);
+  window.addEventListener('keydown', startBgm);
+});
+</script>
+</body>
+</html>
